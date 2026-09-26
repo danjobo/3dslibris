@@ -19,20 +19,43 @@ void DrawToScreen(Text *ts, int color_mode, u16 *target_screen, int logical_h)
   if (w <= 0 || stride <= 0 || logical_h <= 0)
     return;
 
-  static std::vector<u16> gradient;
-  static int cachedW = 0;
-  static int cachedH = 0;
-  static int cachedColorMode = -1;
+  // One cached gradient per screen size. The top and bottom screens differ
+  // in size, so a single cache slot was rebuilt (per-pixel powf) for both
+  // screens on every page turn, which cost seconds on Old 3DS.
+  struct GradientCache
+  {
+    std::vector<u16> pixels;
+    int w;
+    int h;
+    int color_mode;
+    unsigned int last_use;
+  };
+  static GradientCache caches[2] = {{std::vector<u16>(), 0, 0, -1, 0},
+                                    {std::vector<u16>(), 0, 0, -1, 0}};
+  static unsigned int use_counter = 0;
+  use_counter++;
+
+  GradientCache *slot = NULL;
+  for (int i = 0; i < 2; i++)
+  {
+    if (!caches[i].pixels.empty() && caches[i].w == w &&
+        caches[i].h == logical_h && caches[i].color_mode == color_mode)
+      slot = &caches[i];
+  }
+  const bool rebuild = (slot == NULL);
+  if (rebuild)
+    slot = caches[0].last_use <= caches[1].last_use ? &caches[0] : &caches[1];
+  slot->last_use = use_counter;
+  std::vector<u16> &gradient = slot->pixels;
 
   const ThemePalette &palette = GetThemePalette(color_mode);
 
-  if (gradient.empty() || cachedW != w || cachedH != logical_h ||
-      cachedColorMode != color_mode)
+  if (rebuild)
   {
     gradient.resize((size_t)w * (size_t)logical_h);
-    cachedW = w;
-    cachedH = logical_h;
-    cachedColorMode = color_mode;
+    slot->w = w;
+    slot->h = logical_h;
+    slot->color_mode = color_mode;
     static const u8 kBayer4x4[4][4] = {
         {0, 8, 2, 10},
         {12, 4, 14, 6},
@@ -40,23 +63,28 @@ void DrawToScreen(Text *ts, int color_mode, u16 *target_screen, int logical_h)
         {15, 7, 13, 5},
     };
 
+    // The vignette depends only on the column.
+    std::vector<float> column_vignette((size_t)w);
+    for (int x = 0; x < w; x++)
+    {
+      const float dx =
+          (w > 1)
+              ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+              : 0.0f;
+      column_vignette[(size_t)x] = 1.0f - 0.12f * powf(fabsf(dx), 1.8f);
+    }
+
     for (int y = 0; y < logical_h; y++)
     {
       const float tY =
           (logical_h > 1) ? ((float)y / (float)(logical_h - 1)) : 0.0f;
       for (int x = 0; x < w; x++)
       {
-        const float dx =
-            (w > 1)
-                ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
-                : 0.0f;
-        const float edge = fabsf(dx);
-
         float r = palette.bgTopR + (palette.bgBotR - palette.bgTopR) * tY;
         float g = palette.bgTopG + (palette.bgBotG - palette.bgTopG) * tY;
         float b = palette.bgTopB + (palette.bgBotB - palette.bgTopB) * tY;
 
-        const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+        const float vignette = column_vignette[(size_t)x];
 
         const float bayer =
             (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
