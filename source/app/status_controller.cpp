@@ -15,6 +15,7 @@
 #include "app/status_controller.h"
 
 #include <algorithm>
+#include <stdio.h>
 #include <time.h>
 
 #include "app/app.h"
@@ -24,6 +25,7 @@
 #include "shared/app_flow_utils.h"
 #include "shared/battery_utils.h"
 #include "shared/orientation_utils.h"
+#include "shared/page_timing.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
 
@@ -314,6 +316,23 @@ void StatusController::UpdateStatus()
         right_edge = hx - 4;
       }
     }
+
+#if PAGE_TIMING
+    // Last page draw / present time in ms (performance builds only).
+    if (mode == AppMode::Book)
+    {
+      const page_timing::Stats &timing = page_timing::Last();
+      char timing_text[32];
+      snprintf(timing_text, sizeof(timing_text), "d%u p%u",
+               (unsigned)(timing.draw_us / 1000),
+               (unsigned)(timing.present_us / 1000));
+      const int tw = app_.ts->GetStringWidth(timing_text, TEXT_STYLE_BROWSER);
+      const int tx = right_edge - tw;
+      app_.ts->SetPen(tx, textY);
+      app_.ts->PrintString(timing_text);
+      right_edge = tx - 4;
+    }
+#endif
 
     int pX = right_edge;
     if (mode == AppMode::Opening)

@@ -22,6 +22,7 @@
 #include "shared/debug_log.h"
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/page_timing.h"
 
 MainLoopController::MainLoopController(App &app) : app_(app) {}
 
@@ -246,7 +247,13 @@ int MainLoopController::RunMainLoop()
     }
     else
     {
+#if PAGE_TIMING
+      const uint64_t present_start = page_timing::Now();
+      if (app_.PresentIfDirty() && app_.GetMode() == AppMode::Book)
+        page_timing::Last().present_us = page_timing::ElapsedUs(present_start);
+#else
       app_.PresentIfDirty();
+#endif
     }
   }
   app_.PersistPrefs();

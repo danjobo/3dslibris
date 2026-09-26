@@ -13,6 +13,7 @@
 
 #include "book/book.h"
 #include "book/book_renderer.h"
+#include "shared/page_timing.h"
 #include "ui/text.h"
 
 namespace book_nav {
@@ -20,7 +21,13 @@ namespace book_nav {
 void DrawPage(Book *book, Text *ts) {
   if (!book || !ts || book->GetPageCount() == 0)
     return;
+#if PAGE_TIMING
+  const uint64_t start = page_timing::Now();
+#endif
   book_renderer::DrawCurrentView(book, ts);
+#if PAGE_TIMING
+  page_timing::Last().draw_us = page_timing::ElapsedUs(start);
+#endif
 }
 
 bool SetPage(Book *book, Text *ts, uint16_t page) {
