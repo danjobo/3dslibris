@@ -12,6 +12,7 @@
 
 #include "menus/bookmark_menu.h"
 
+#include <algorithm>
 #include <stdio.h>
 
 #include "book/book.h"
@@ -227,24 +228,38 @@ static std::vector<std::string> WrapTextToLines(Text *ts,
 
 }
 
-BookmarkMenu::BookmarkMenu(App *_app) : PagedListMenu(_app, "bookmarks") {}
+BookmarkMenu::BookmarkMenu(App *_app)
+    : PagedListMenu(_app, "bookmarks & notes") {}
 
 BookmarkMenu::~BookmarkMenu() {}
 
-void BookmarkMenu::BuildEntries(Book *book, Text *text,
-                                std::vector<std::string> &labels,
-                                std::vector<u16> &pages) {
-  if (!book)
-    return;
 
+namespace {
+
+struct ListEntry {
+  u16 page;
+  int kind; // 0 = bookmark, 1 = highlight: bookmarks first on a page
+  size_t order;
+  std::string label;
+};
+
+bool EntryLess(const ListEntry &a, const ListEntry &b) {
+  if (a.page != b.page)
+    return a.page < b.page;
+  if (a.kind != b.kind)
+    return a.kind < b.kind;
+  return a.order < b.order;
+}
+
+void AppendBookmarkEntries(Book *book, Text *text,
+                           std::vector<ListEntry> *entries) {
   std::list<u16> &bookmarks = book->GetBookmarks();
-  labels.reserve(bookmarks.size());
-  pages.reserve(bookmarks.size());
 
   const int kPreviewWidth = 220;
   const int kMaxPreviewLines = 2;
   const size_t kPreviewChars = 120;
 
+  size_t order = 0;
   for (auto pg : bookmarks) {
     char label[64];
     snprintf(label, sizeof(label), "Page %d", pg + 1);
@@ -262,7 +277,75 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
       }
     }
 
-    labels.push_back(full_label);
-    pages.push_back(pg);
+    ListEntry entry;
+    entry.page = pg;
+    entry.kind = 0;
+    entry.order = order++;
+    entry.label = full_label;
+    entries->push_back(entry);
+  }
+}
+
+void AppendHighlightEntries(Book *book, Text *text,
+                            std::vector<ListEntry> *entries) {
+  if (!book->SupportsAnnotations())
+    return;
+  const int kPreviewWidth = 220;
+  const u16 page_count = book->GetPageCount();
+  const std::vector<Annotation> &annotations = book->GetAnnotations();
+  for (size_t i = 0; i < annotations.size(); i++) {
+    const Annotation &a = annotations[i];
+    const int resolved = book->GetAnnotationPage(a.id);
+    int page = resolved >= 0 ? resolved : (int)a.page_hint;
+    if (page_count > 0 && page >= (int)page_count)
+      page = page_count - 1;
+
+    // Highlights whose text can no longer be found (e.g. the book file
+    // changed) still list at their last known page.
+    char header[64];
+    snprintf(header, sizeof(header),
+             resolved >= 0 ? "Page %d - highlight"
+                           : "Page %d - highlight (not found)",
+             page + 1);
+    std::string label = header;
+    std::vector<std::string> quote_lines = WrapTextToLines(
+        text, "\"" + SanitizePreviewText(a.quote) + "\"", kPreviewWidth, 1);
+    if (!quote_lines.empty())
+      label += "\n" + quote_lines[0];
+    const std::string note = SanitizePreviewText(a.note);
+    if (!note.empty()) {
+      std::vector<std::string> note_lines =
+          WrapTextToLines(text, "Note: " + note, kPreviewWidth, 1);
+      if (!note_lines.empty())
+        label += "\n" + note_lines[0];
+    }
+
+    ListEntry entry;
+    entry.page = (u16)page;
+    entry.kind = 1;
+    entry.order = i;
+    entry.label = label;
+    entries->push_back(entry);
+  }
+}
+
+} // namespace
+
+void BookmarkMenu::BuildEntries(Book *book, Text *text,
+                                std::vector<std::string> &labels,
+                                std::vector<u16> &pages) {
+  if (!book)
+    return;
+
+  std::vector<ListEntry> entries;
+  AppendBookmarkEntries(book, text, &entries);
+  AppendHighlightEntries(book, text, &entries);
+  std::stable_sort(entries.begin(), entries.end(), EntryLess);
+
+  labels.reserve(entries.size());
+  pages.reserve(entries.size());
+  for (size_t i = 0; i < entries.size(); i++) {
+    labels.push_back(entries[i].label);
+    pages.push_back(entries[i].page);
   }
 }

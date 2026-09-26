@@ -117,6 +117,44 @@ u16 LinkTextColor(Text *ts) {
   }
 }
 
+bool IsDarkColorMode(Text *ts) {
+  if (!ts)
+    return false;
+  const int mode = ts->GetColorMode();
+  return mode == 1 || mode == 4 || mode == 5;
+}
+
+// RGB565 tints drawn behind glyphs; glyphs alpha-blend over them.
+u16 HighlightTint(Text *ts) {
+  return IsDarkColorMode(ts) ? 0x5A82 /* dark olive */
+                             : 0xFF71 /* soft yellow */;
+}
+
+u16 SelectionTint(Text *ts) {
+  return IsDarkColorMode(ts) ? 0x29ED /* dark blue */
+                             : 0xAE7F /* light blue */;
+}
+
+bool BufIndexInRanges(const std::vector<Book::HighlightRange> &ranges,
+                      int index) {
+  for (size_t r = 0; r < ranges.size(); r++)
+    if (index >= ranges[r].buf_begin && index < ranges[r].buf_end)
+      return true;
+  return false;
+}
+
+bool IsWordSeparator(u32 c) {
+  return c == ' ' || c == '\t' || c == 0xA0 || c == 0x3000 ||
+         (c >= 0x2000 && c <= 0x200B);
+}
+
+// Scripts written without spaces: select them one character at a time.
+bool IsStandaloneGlyph(u32 c) {
+  return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xAC00 && c <= 0xD7AF) ||
+         (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFF00 && c <= 0xFFEF) ||
+         (c >= 0x20000 && c <= 0x2FFFF);
+}
+
 } // namespace
 
 Page::Page(Book *b) {
@@ -233,6 +271,29 @@ void Page::Draw(Text *ts) {
   u16 active_link_href_id = 0;
   int active_link_render_index = -1;
   rendered_inline_links_.clear();
+
+  // Highlights and the in-progress selection are painted behind glyphs.
+  // Word boxes are only recorded while selection mode needs them.
+  rendered_words_.clear();
+  std::vector<Book::HighlightRange> highlight_ranges;
+  int preview_begin = -1;
+  int preview_end = -1;
+  bool capture_words = false;
+  if (book && book->SupportsAnnotations()) {
+    book->CollectHighlightRanges(this, &highlight_ranges);
+    const bool is_current = book->GetPageIndex(this) == book->GetPosition();
+    if (is_current) {
+      capture_words = book->IsWordCaptureEnabled();
+      if (!book->GetSelectionPreview(&preview_begin, &preview_end)) {
+        preview_begin = -1;
+        preview_end = -1;
+      }
+    }
+  }
+  const u16 highlight_tint = HighlightTint(ts);
+  const u16 selection_tint = SelectionTint(ts);
+  int open_word = -1;
+  int open_word_baseline = 0;
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -472,6 +533,7 @@ void Page::Draw(Text *ts) {
       // line break, page breaking if necessary
       flush_render_line("newline-before");
       i++;
+      open_word = -1;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       next_image_align = 0;
       next_image_author_width = 0;
@@ -900,24 +962,79 @@ void Page::Draw(Text *ts) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
+      u8 glyph_style = TEXT_STYLE_REGULAR;
       if (mono && ts->bold && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
+        glyph_style = TEXT_STYLE_MONO_BOLDITALIC;
       else if (mono && ts->bold)
-        ts->PrintChar(c, TEXT_STYLE_MONO_BOLD);
+        glyph_style = TEXT_STYLE_MONO_BOLD;
       else if (mono && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_MONO_ITALIC);
+        glyph_style = TEXT_STYLE_MONO_ITALIC;
       else if (mono)
-        ts->PrintChar(c, TEXT_STYLE_MONO);
+        glyph_style = TEXT_STYLE_MONO;
       else if (ts->bold && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
+        glyph_style = TEXT_STYLE_BOLDITALIC;
       else if (ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_ITALIC);
+        glyph_style = TEXT_STYLE_ITALIC;
       else if (ts->bold)
-        ts->PrintChar(c, TEXT_STYLE_BOLD);
-      else
-        ts->PrintChar(c, TEXT_STYLE_REGULAR);
+        glyph_style = TEXT_STYLE_BOLD;
+
+      const int glyph_index = (int)i - 1;
+      const bool in_preview =
+          glyph_index >= preview_begin && glyph_index < preview_end;
+      const bool in_highlight =
+          !in_preview && !highlight_ranges.empty() &&
+          BufIndexInRanges(highlight_ranges, glyph_index);
+      if (in_preview || in_highlight) {
+        const int advance = (int)ts->GetAdvance(c, glyph_style);
+        const int line_h = (int)ts->GetHeight();
+        const int y0 = std::max(0, base_pen_y - line_h + 1);
+        const int y1 = std::min(ts->LogicalHeight(),
+                                base_pen_y + std::max(2, line_h / 5));
+        const int x1 = std::min(ts->LogicalWidth(), glyph_x0 + advance);
+        if (advance > 0 && x1 > glyph_x0 && y1 > y0)
+          ts->FillRect((u16)glyph_x0, (u16)y0, (u16)x1, (u16)y1,
+                       in_preview ? selection_tint : highlight_tint);
+      }
+
+      ts->PrintChar(c, glyph_style);
 
       const int glyph_x1 = (int)ts->GetPenX();
+      if (capture_words) {
+        if (IsWordSeparator(c)) {
+          open_word = -1;
+        } else {
+          const u8 screen_index = on_first_screen ? 0 : 1;
+          const bool continues =
+              open_word >= 0 && !IsStandaloneGlyph(c) &&
+              open_word_baseline == base_pen_y &&
+              rendered_words_[(size_t)open_word].screen_index == screen_index;
+          if (continues) {
+            text_selection_utils::WordBox &word =
+                rendered_words_[(size_t)open_word];
+            word.buf_end = glyph_index + 1;
+            ExpandLinkBounds(&word.bounds, glyph_x0,
+                             base_pen_y - ts->GetHeight(), glyph_x1,
+                             base_pen_y + 2);
+          } else {
+            text_selection_utils::WordBox word;
+            word.buf_begin = glyph_index;
+            word.buf_end = glyph_index + 1;
+            word.screen_index = screen_index;
+            word.bounds.x0 = 0;
+            word.bounds.y0 = 0;
+            word.bounds.x1 = 0;
+            word.bounds.y1 = 0;
+            ExpandLinkBounds(&word.bounds, glyph_x0,
+                             base_pen_y - ts->GetHeight(), glyph_x1,
+                             base_pen_y + 2);
+            rendered_words_.push_back(word);
+            open_word = IsStandaloneGlyph(c)
+                            ? -1
+                            : (int)rendered_words_.size() - 1;
+            open_word_baseline = base_pen_y;
+          }
+        }
+      }
       if (link_active && active_link_render_index >= 0 &&
           active_link_render_index < (int)rendered_inline_links_.size()) {
         InlineLinkRenderEntry &entry =

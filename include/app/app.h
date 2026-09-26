@@ -66,6 +66,7 @@ https://github.com/rhaleblian/dslibris
 #include "shared/main.h"
 #include "parse.h"
 #include "reader/page_repeat_utils.h"
+#include "reader/text_selection_utils.h"
 #include "settings/prefs_button_ids.h"
 #include "ui/text.h"
 #include "shared/status_reporter.h"
@@ -254,6 +255,10 @@ public:
   void SetInlineLinkHoldConsumed(bool consumed);
   u64 GetInlineLinkHoldStartedAtMs() const;
   void SetInlineLinkHoldStartedAtMs(u64 started_at_ms);
+  text_selection_utils::TextSelectionState &MutableTextSelection()
+  {
+    return reader_state_.text_selection;
+  }
   bool IsNew3dsDevice() const;
   bool IsHomebrewEnvironment() const;
   bool IsAppletSuspended() const;
@@ -376,6 +381,7 @@ private:
     bool inline_link_hold_consumed;
     u64 inline_link_hold_started_at_ms;
     reader::PageRepeatState page_repeat;
+    text_selection_utils::TextSelectionState text_selection;
 
     ReaderRuntimeState()
         : opening(), deferred_relayout(), bookcurrent(nullptr),
@@ -385,7 +391,7 @@ private:
           pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
           inline_link_focus_active(false), inline_link_hold_armed(false),
           inline_link_hold_consumed(false),
-          inline_link_hold_started_at_ms(0), page_repeat() {}
+          inline_link_hold_started_at_ms(0), page_repeat(), text_selection() {}
   };
 
   NavigationState nav_;

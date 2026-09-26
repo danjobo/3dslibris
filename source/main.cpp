@@ -194,6 +194,7 @@ int main(int argc, char **argv) {
   mkdir(paths::GetResourceDir().c_str(), 0777);
   mkdir(paths::GetCacheBaseDir().c_str(), 0777);
   mkdir(paths::GetCoverCacheDir().c_str(), 0777);
+  mkdir(paths::GetAnnotationsDir().c_str(), 0777);
 
   // Run the app, which takes over the main loop until exit.
   boot_trace::Boot("before app initialization");

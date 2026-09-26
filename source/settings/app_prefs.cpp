@@ -319,7 +319,7 @@ void SettingsController::PrefsInit() {
       "extra paragraph spacing", "reading orientation", "handedness",
       "clock format",
       "time remaining", "reopen last book", "color mode", "library view",
-      "circle pad pages", "library sort", "book information", "index", "bookmarks",
+      "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
 

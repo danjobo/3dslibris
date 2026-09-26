@@ -69,6 +69,21 @@ Bookmarks:
 - D-Pad Left/Right: jump between bookmarks
   - current mapping uses Left = next bookmark, Right = previous bookmark
 
+Highlights & notes:
+- Hold X: enter selection mode (short X press still cycles the theme)
+- D-Pad: move the word cursor (Up/Down moves between lines and screens)
+- L / R: jump to the first / last word on the page
+- A: mark where the selection starts, move, then A again to finish
+- Touch: drag across words on the touch screen to select them
+- After selecting, choose Highlight, Highlight + note, or Cancel
+- Put the cursor on an existing highlight and press A to edit its note
+  or delete it
+- B: undo the start mark, or leave selection mode
+- Highlights and notes are listed with your bookmarks in
+  BOOK settings > bookmarks & notes
+- They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
+  font size and layout changes and clearing the cache
+
 Other:
 - X: cycle theme (normal / dark / sepia)
 - Start: return to library
@@ -175,7 +190,7 @@ MOBI notes:
 - BOOK settings contain only book/document-specific actions such as:
   - go to page
   - index
-  - bookmarks
+  - bookmarks & notes
   - publisher font sizes (toggle CSS font sizes, off by default)
   - format-specific options like MOBI line-wrap fix
   - reading direction toggle (Left to right / Right to left) for PDF/CBZ/XPS

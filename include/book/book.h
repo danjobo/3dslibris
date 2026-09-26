@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include "book/annotation.h"
+#include "book/annotation_text_utils.h"
 #include "book/book_context.h"
 #include "book/inline_image_layout.h"
 #include "shared/app_flow_utils.h"
@@ -471,6 +473,59 @@ public:
   bool IsOpenAbortRequested() const;
   void RequestAbortOpen();
   void ClearOpenAbortRequest();
+
+  // Highlights and notes (book_annotations.cpp). Reflowable books only;
+  // annotations are loaded lazily from paths::GetAnnotationsDir() and saved
+  // after every change. Main thread only.
+  struct HighlightRange {
+    int buf_begin;
+    int buf_end;
+    uint32_t annotation_id;
+  };
+  bool SupportsAnnotations() const;
+  const std::vector<Annotation> &GetAnnotations();
+  const Annotation *FindAnnotation(uint32_t id);
+  //! Returns the new annotation id, or 0 if the range has no visible text.
+  uint32_t AddAnnotationFromPageRange(int page_index, int buf_begin,
+                                      int buf_end, const std::string &note);
+  bool SetAnnotationNote(uint32_t id, const std::string &note);
+  bool RemoveAnnotation(uint32_t id);
+  //! Page where the annotation currently starts, or -1 if it can't be found.
+  int GetAnnotationPage(uint32_t id);
+  void CollectHighlightRanges(const Page *page,
+                              std::vector<HighlightRange> *out);
+  //! Id of the annotation covering buf_index on the page, or 0.
+  uint32_t FindAnnotationAt(int page_index, int buf_index);
+  int GetPageIndex(const Page *page);
+
+  // Transient state for the reader's selection mode, read by Page::Draw.
+  void SetSelectionPreview(int buf_begin, int buf_end);
+  void ClearSelectionPreview();
+  bool GetSelectionPreview(int *buf_begin, int *buf_end) const;
+  void SetWordCaptureEnabled(bool enabled) { word_capture_enabled_ = enabled; }
+  bool IsWordCaptureEnabled() const { return word_capture_enabled_; }
+
+private:
+  struct AnnotationSpans {
+    uint32_t id;
+    std::vector<annotation_text_utils::ResolvedSpan> spans;
+  };
+  void EnsureAnnotationsLoaded();
+  void SaveAnnotations();
+  void InvalidateAnnotationSpans() { annotation_spans_valid_ = false; }
+  void EnsureAnnotationSpans();
+  std::string AnnotationFilePath();
+
+  std::vector<Annotation> annotations_;
+  bool annotations_loaded_ = false;
+  std::vector<AnnotationSpans> annotation_spans_;
+  bool annotation_spans_valid_ = false;
+  unsigned int annotation_spans_revision_ = 0;
+  size_t annotation_spans_page_count_ = 0;
+  const Page *annotation_spans_first_page_ = nullptr;
+  int selection_preview_begin_ = -1;
+  int selection_preview_end_ = -1;
+  bool word_capture_enabled_ = false;
 };
 
 #include "formats/cbz/cbz_state.h"

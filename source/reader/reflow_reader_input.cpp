@@ -18,7 +18,10 @@
 #include "book/page.h"
 #include "reader/book_page_nav.h"
 #include "reader/inline_link_utils.h"
+#include "reader/note_editor.h"
 #include "reader/page_repeat_utils.h"
+#include "reader/text_selection_utils.h"
+#include "ui/button.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
 #include "ui/text.h"
@@ -200,6 +203,312 @@ static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
   return FollowFocusedInlineLink(book, ts);
 }
 
+// ---------------------------------------------------------------------------
+// Text selection mode (highlights and notes).
+//
+// Hold X to enter. The D-pad moves a word cursor (touch drag also selects on
+// the touch screen); A marks the start, A again opens the action popup.
+// ---------------------------------------------------------------------------
+
+using text_selection_utils::SelectionPopup;
+using text_selection_utils::TextSelectionState;
+using text_selection_utils::WordBox;
+
+static const uint64_t kSelectionHoldThresholdMs = 400;
+static const int kTouchWordPadPx = 6;
+static const int kPopupOptionCount = 3;
+static const int kPopupButtonW = 220;
+static const int kPopupButtonH = 36;
+static const int kPopupButtonX = 10;
+static const int kPopupButtonY0 = 90;
+static const int kPopupButtonStride = 42;
+
+static const std::vector<WordBox> *CurrentPageWords(Book *book) {
+  if (!book || book->GetPageCount() == 0 || book->IsFixedLayout())
+    return NULL;
+  Page *page = book->GetPage();
+  return page ? &page->GetRenderedWords() : NULL;
+}
+
+static const char *PopupLabel(SelectionPopup popup, int index) {
+  static const char *kNew[kPopupOptionCount] = {"Highlight",
+                                                "Highlight + note", "Cancel"};
+  static const char *kExisting[kPopupOptionCount] = {
+      "Edit note", "Delete highlight", "Cancel"};
+  if (index < 0 || index >= kPopupOptionCount)
+    return "";
+  return popup == SelectionPopup::ExistingHighlight ? kExisting[index]
+                                                    : kNew[index];
+}
+
+static void LayoutPopupButton(Button *button, int index) {
+  button->Init();
+  button->Resize(kPopupButtonW, kPopupButtonH);
+  button->Move(kPopupButtonX, kPopupButtonY0 + index * kPopupButtonStride);
+}
+
+static void DrawSelectionPopup(App &app, Text *ts) {
+  const TextSelectionState &sel = app.MutableTextSelection();
+  if (sel.popup == SelectionPopup::None || !ts)
+    return;
+  for (int i = 0; i < kPopupOptionCount; i++) {
+    Button button(ts);
+    LayoutPopupButton(&button, i);
+    button.SetLabel1(PopupLabel(sel.popup, i));
+    button.Draw(ts->screenright, i == sel.popup_index);
+  }
+  ts->MarkScreenDirty(ts->screenright);
+}
+
+static int PopupOptionAt(Text *ts, int x, int y) {
+  for (int i = 0; i < kPopupOptionCount; i++) {
+    Button button(ts);
+    LayoutPopupButton(&button, i);
+    if (button.EnclosesPoint((u16)x, (u16)y))
+      return i;
+  }
+  return -1;
+}
+
+// Pushes the current selection into the book and redraws the page (and the
+// popup on top of it, if open).
+static void RedrawSelection(App &app, Book *book, Text *ts) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  int begin = 0;
+  int end = 0;
+  if (sel.active && words &&
+      text_selection_utils::SelectionBufRange(*words, sel.anchor, sel.cursor,
+                                              &begin, &end))
+    book->SetSelectionPreview(begin, end);
+  else
+    book->ClearSelectionPreview();
+  book_nav::DrawPage(book, ts);
+  DrawSelectionPopup(app, ts);
+}
+
+static void ExitSelectionMode(App &app, Book *book, Text *ts) {
+  app.MutableTextSelection().ResetSelection();
+  if (book) {
+    book->SetWordCaptureEnabled(false);
+    book->ClearSelectionPreview();
+    book_nav::DrawPage(book, ts);
+  }
+  app.RequestStatusRedraw();
+}
+
+static bool EnterSelectionMode(App &app, Book *book, Text *ts) {
+  if (!book || !ts || !book->SupportsAnnotations())
+    return false;
+  TextSelectionState &sel = app.MutableTextSelection();
+  sel.ResetSelection();
+  sel.active = true;
+  book->ClearSelectionPreview();
+  book->SetWordCaptureEnabled(true);
+  // Redraw once to record word boxes for this page.
+  book_nav::DrawPage(book, ts);
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  if (!words || words->empty()) {
+    ExitSelectionMode(app, book, ts);
+    app.PrintStatus("No text to select on this page");
+    return false;
+  }
+  sel.cursor = 0;
+  RedrawSelection(app, book, ts);
+  app.RequestStatusRedraw();
+  return true;
+}
+
+static uint32_t HighlightUnderCursor(Book *book,
+                                     const TextSelectionState &sel) {
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  if (!words || sel.cursor < 0 || sel.cursor >= (int)words->size())
+    return 0;
+  return book->FindAnnotationAt(book->GetPosition(),
+                                (*words)[(size_t)sel.cursor].buf_begin);
+}
+
+static void OpenPopupForSelection(App &app, Book *book, Text *ts) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  if (!words)
+    return;
+  const bool single_word = sel.anchor < 0 || sel.anchor == sel.cursor;
+  const uint32_t existing = single_word ? HighlightUnderCursor(book, sel) : 0;
+  sel.popup_index = 0;
+  if (existing) {
+    sel.popup = SelectionPopup::ExistingHighlight;
+    sel.popup_annotation_id = existing;
+  } else if (text_selection_utils::SelectionBufRange(
+                 *words, sel.anchor, sel.cursor, &sel.popup_buf_begin,
+                 &sel.popup_buf_end)) {
+    sel.popup = SelectionPopup::NewSelection;
+  } else {
+    return;
+  }
+  RedrawSelection(app, book, ts);
+}
+
+static void ClosePopup(App &app, Book *book, Text *ts) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  sel.popup = SelectionPopup::None;
+  sel.popup_index = 0;
+  sel.popup_annotation_id = 0;
+  RedrawSelection(app, book, ts);
+}
+
+static void RunPopupOption(App &app, Book *book, Text *ts, int option) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const int page = book->GetPosition();
+  if (sel.popup == SelectionPopup::NewSelection) {
+    if (option == 0) {
+      if (!book->AddAnnotationFromPageRange(page, sel.popup_buf_begin,
+                                            sel.popup_buf_end, ""))
+        app.PrintStatus("Nothing to highlight");
+    } else if (option == 1) {
+      std::string note;
+      if (note_editor::Edit("", &note) &&
+          !book->AddAnnotationFromPageRange(page, sel.popup_buf_begin,
+                                            sel.popup_buf_end, note))
+        app.PrintStatus("Nothing to highlight");
+      // The keyboard applet replaced both screens.
+      ts->MarkAllScreensDirty();
+    } else {
+      // Cancel keeps selection mode open so the range can be adjusted.
+      sel.anchor = -1;
+      ClosePopup(app, book, ts);
+      return;
+    }
+  } else if (sel.popup == SelectionPopup::ExistingHighlight) {
+    const uint32_t id = sel.popup_annotation_id;
+    if (option == 0) {
+      const Annotation *a = book->FindAnnotation(id);
+      std::string note;
+      if (a && note_editor::Edit(a->note, &note))
+        book->SetAnnotationNote(id, note);
+      ts->MarkAllScreensDirty();
+    } else if (option == 1) {
+      book->RemoveAnnotation(id);
+    } else {
+      ClosePopup(app, book, ts);
+      return;
+    }
+  }
+  ExitSelectionMode(app, book, ts);
+}
+
+static void MoveCursorTo(App &app, Book *book, Text *ts, int word) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  if (word < 0 || word == sel.cursor)
+    return;
+  sel.cursor = word;
+  RedrawSelection(app, book, ts);
+}
+
+// Handles one frame of input while selection mode is active. Always
+// consumes the input.
+static bool HandleSelectionInput(App &app, Book *book, Text *ts,
+                                 const FrameInput &input) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const uint32_t keys = input.keys_down;
+  const uint32_t held = input.keys_held;
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  if (!words || words->empty()) {
+    ExitSelectionMode(app, book, ts);
+    return true;
+  }
+  const int word_count = (int)words->size();
+
+  if (sel.popup != SelectionPopup::None) {
+    if (keys & app.key.a) {
+      RunPopupOption(app, book, ts, sel.popup_index);
+    } else if (keys & app.key.b) {
+      ClosePopup(app, book, ts);
+    } else if (keys & (app.key.dup | app.key.up)) {
+      sel.popup_index = text_selection_utils::StepPopupIndex(
+          kPopupOptionCount, sel.popup_index, -1);
+      RedrawSelection(app, book, ts);
+    } else if (keys & (app.key.ddown | app.key.down)) {
+      sel.popup_index = text_selection_utils::StepPopupIndex(
+          kPopupOptionCount, sel.popup_index, 1);
+      RedrawSelection(app, book, ts);
+    } else if (keys & KEY_TOUCH) {
+      const touchPosition mapped = app.MapTouch(input);
+      const int option = PopupOptionAt(ts, mapped.px, mapped.py);
+      if (option >= 0) {
+        sel.popup_index = option;
+        RunPopupOption(app, book, ts, option);
+      }
+    }
+    return true;
+  }
+
+  // Touch drag: select from the touched word to the word under the finger.
+  if (keys & KEY_TOUCH) {
+    const touchPosition mapped = app.MapTouch(input);
+    const int word = text_selection_utils::WordAtPoint(
+        *words, 1, mapped.px, mapped.py, kTouchWordPadPx);
+    if (word >= 0) {
+      sel.anchor = word;
+      sel.cursor = word;
+      sel.touch_dragging = true;
+      RedrawSelection(app, book, ts);
+    }
+    return true;
+  }
+  if (sel.touch_dragging) {
+    if (held & KEY_TOUCH) {
+      const touchPosition mapped = app.MapTouch(input);
+      MoveCursorTo(app, book, ts,
+                   text_selection_utils::WordAtPoint(
+                       *words, 1, mapped.px, mapped.py, kTouchWordPadPx));
+    } else {
+      sel.touch_dragging = false;
+      OpenPopupForSelection(app, book, ts);
+    }
+    return true;
+  }
+
+  if (keys & app.key.a) {
+    if (sel.anchor < 0 && !HighlightUnderCursor(book, sel)) {
+      sel.anchor = sel.cursor;
+      RedrawSelection(app, book, ts);
+      app.RequestStatusRedraw();
+    } else {
+      OpenPopupForSelection(app, book, ts);
+    }
+  } else if (keys & app.key.b) {
+    if (sel.anchor >= 0) {
+      sel.anchor = -1;
+      RedrawSelection(app, book, ts);
+      app.RequestStatusRedraw();
+    } else {
+      ExitSelectionMode(app, book, ts);
+    }
+  } else if (keys & (app.key.dleft | app.key.left)) {
+    MoveCursorTo(app, book, ts,
+                 text_selection_utils::StepWord(word_count, sel.cursor, -1));
+  } else if (keys & (app.key.dright | app.key.right)) {
+    MoveCursorTo(app, book, ts,
+                 text_selection_utils::StepWord(word_count, sel.cursor, 1));
+  } else if (keys & (app.key.dup | app.key.up)) {
+    MoveCursorTo(app, book, ts,
+                 text_selection_utils::VerticalNeighbor(*words, sel.cursor,
+                                                        false));
+  } else if (keys & (app.key.ddown | app.key.down)) {
+    MoveCursorTo(app, book, ts,
+                 text_selection_utils::VerticalNeighbor(*words, sel.cursor,
+                                                        true));
+  } else if (keys & app.key.l) {
+    MoveCursorTo(app, book, ts, 0);
+  } else if (keys & app.key.r) {
+    MoveCursorTo(app, book, ts, word_count - 1);
+  } else if (keys & (app.key.start | app.key.select | app.key.x)) {
+    ExitSelectionMode(app, book, ts);
+  }
+  return true;
+}
+
 } // namespace
 
 namespace reflow_input {
@@ -212,6 +521,45 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
   bool status_dirty = false;
   const bool has_inline_links = CurrentPageHasInlineLinks(book);
   const uint64_t now_ms = input.timestamp_ms;
+  TextSelectionState &selection = app.MutableTextSelection();
+
+  if (selection.active) {
+    app.ResetPageRepeat();
+    HandleSelectionInput(app, book, ts, input);
+    return true;
+  }
+
+  // X: short press cycles the colour theme (on release), hold enters text
+  // selection for highlights and notes.
+  if (!app.IsInlineLinkFocusActive() && (keys & app.key.x)) {
+    selection.x_hold_armed = true;
+    selection.x_hold_consumed = false;
+    selection.x_hold_started_ms = now_ms;
+  }
+  if (selection.x_hold_armed && (held & app.key.x) &&
+      !selection.x_hold_consumed &&
+      now_ms >= selection.x_hold_started_ms + kSelectionHoldThresholdMs) {
+    selection.x_hold_consumed = true;
+    app.ResetPageRepeat();
+    if (EnterSelectionMode(app, book, ts))
+      return true;
+  }
+  if (selection.x_hold_armed && !(held & app.key.x)) {
+    const bool consumed = selection.x_hold_consumed;
+    selection.x_hold_armed = false;
+    selection.x_hold_consumed = false;
+    selection.x_hold_started_ms = 0;
+    if (!consumed && !app.IsInlineLinkFocusActive()) {
+      int mode = ts->GetColorMode();
+      int next = (mode + 1) % 6;
+      app.colorMode = next;
+      ts->SetColorMode(next);
+      UiButtonSkin_SetColorMode(next);
+      ts->MarkAllScreensDirty();
+      book_nav::DrawPage(book, ts);
+      status_dirty = true;
+    }
+  }
 
   if (!app.IsInlineLinkFocusActive() && (keys & app.key.y)) {
     app.SetInlineLinkHoldArmed(true);
@@ -294,14 +642,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       else
         app.ResetPageRepeat();
     } else if (keys & app.key.x) {
-      int mode = ts->GetColorMode();
-      int next = (mode + 1) % 6;
-      app.colorMode = next;
-      ts->SetColorMode(next);
-      UiButtonSkin_SetColorMode(next);
-      ts->MarkAllScreensDirty();
-      book_nav::DrawPage(book, ts);
-      status_dirty = true;
+      // x: colour cycle on release / selection on hold, handled above
     } else if (keys & app.key.y) {
       // y without hold: consumed by hold-arm; no-op here
     } else if (keys & KEY_TOUCH) {

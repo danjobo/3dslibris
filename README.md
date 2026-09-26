@@ -26,6 +26,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Six reading themes with matching splash screens and reader gradients.
 - Supported formats: `EPUB`, `FB2`, `TXT`, `RTF`, `ODT`, `MOBI`, `PDF`, `CBZ` and `XPS`.
 - `EPUB` reflow with TOC support, bookmarks, `go to page`, cached pagination, and broad inline/block formatting support.
+- Highlights and notes in reflowable books, listed with bookmarks for quick jumps and kept across font and layout changes.
 - Fixed-layout viewer for manga and document formats (`CBZ`, `PDF` and `XPS`) with zoom, pan, outline navigation, and full-page preview.
 - Bundled fallback fonts for broader language coverage (Latin, Cyrillic, Greek, CJK, Arabic, Hebrew, Thai, and more).
 
@@ -93,8 +94,8 @@ Standard reading:
 - `ZL` / `ZR` (New 3DS): previous or next page
 - `D-Pad Left` / `D-Pad Right`: jump between bookmarks
 - `Y`: toggle bookmark; hold `Y` on a page with inline links to enter link-focus mode, then D-Pad to move and `A` to follow
-- `X`: change background color
-- `SELECT`: open `BOOK` settings
+- `X`: change background color; hold `X` to select text, then `A` to highlight it or add a note (D-Pad or touch drag to select)
+- `SELECT`: open `BOOK` settings (highlights and notes are listed under "bookmarks & notes")
 - `START`: return to library
 
 Fixed-layout documents (`PDF` / `CBZ` / `XPS`):

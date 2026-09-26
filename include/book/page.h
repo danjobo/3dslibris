@@ -34,6 +34,7 @@ A Book contains a vector of Pages.
 #include <3ds.h>
 #include "book/page_buffer_utils.h"
 #include "reader/inline_link_utils.h"
+#include "reader/text_selection_utils.h"
 #include "ui/text.h"
 #include <cstddef>
 #include <vector>
@@ -52,6 +53,9 @@ class Page {
 	class Book *book;
 	std::vector<u32> storage;
 	std::vector<InlineLinkRenderEntry> rendered_inline_links_;
+	//! Word boxes from the last Draw; only filled while the book has word
+	//! capture enabled (reader selection mode).
+	std::vector<text_selection_utils::WordBox> rendered_words_;
 	mutable int cached_inline_link_count_;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
@@ -79,6 +83,9 @@ class Page {
 	void FreeBuffer();
 	const std::vector<InlineLinkRenderEntry> &GetRenderedInlineLinks() const {
 		return rendered_inline_links_;
+	}
+	const std::vector<text_selection_utils::WordBox> &GetRenderedWords() const {
+		return rendered_words_;
 	}
 	size_t GetInlineLinkCount() const;
 	//	void Draw();

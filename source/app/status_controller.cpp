@@ -300,7 +300,11 @@ void StatusController::UpdateStatus()
     int right_edge = 232;
     if (mode == AppMode::Book)
     {
+      const text_selection_utils::TextSelectionState &selection =
+          app_.MutableTextSelection();
       const char *hint = app_.IsInlineLinkFocusActive() ? "A:go" : "Y:lnk";
+      if (selection.active)
+        hint = selection.anchor >= 0 ? "A:done" : "A:mark";
       if (hint)
       {
         int hw = app_.ts->GetStringWidth(hint, TEXT_STYLE_BROWSER);

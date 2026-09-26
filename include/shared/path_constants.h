@@ -120,6 +120,13 @@ inline const std::string &GetResourceDir() {
   return path;
 }
 
+// User highlights and notes. Kept outside the cache directory, which the
+// "clear cache" setting deletes.
+inline const std::string &GetAnnotationsDir() {
+  static const std::string path = GetSdmcBase() + "/annotations";
+  return path;
+}
+
 inline const std::string &GetCacheBaseDir() {
   static const std::string path = GetSdmcBase() + "/cache";
   return path;

@@ -572,9 +572,16 @@ void ReaderController::CloseBook()
   app_.SetInlineLinkHoldArmed(false);
   app_.SetInlineLinkHoldConsumed(false);
   app_.SetInlineLinkHoldStartedAtMs(0);
+  text_selection_utils::TextSelectionState &selection =
+      app_.MutableTextSelection();
+  selection.ResetSelection();
+  selection.x_hold_armed = false;
+  selection.x_hold_consumed = false;
 
   if (bookcurrent_)
   {
+    bookcurrent_->SetWordCaptureEnabled(false);
+    bookcurrent_->ClearSelectionPreview();
     TryPersistProgress(bookcurrent_, true);
     DBG_LOGF(&app_, "BOOK close current session=%u book=%s",
              app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_));
