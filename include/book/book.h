@@ -498,10 +498,7 @@ public:
   uint32_t FindAnnotationAt(int page_index, int buf_index);
   int GetPageIndex(const Page *page);
 
-  // Transient state for the reader's selection mode, read by Page::Draw.
-  void SetSelectionPreview(int buf_begin, int buf_end);
-  void ClearSelectionPreview();
-  bool GetSelectionPreview(int *buf_begin, int *buf_end) const;
+  // Reader selection mode: record word boxes during Page::Draw.
   void SetWordCaptureEnabled(bool enabled) { word_capture_enabled_ = enabled; }
   bool IsWordCaptureEnabled() const { return word_capture_enabled_; }
 
@@ -513,7 +510,10 @@ private:
   void EnsureAnnotationsLoaded();
   void SaveAnnotations();
   void InvalidateAnnotationSpans() { annotation_spans_valid_ = false; }
-  void EnsureAnnotationSpans();
+  // Page drawing only searches near each highlight's last known page; the
+  // (slow) whole-book search runs when allow_full_scan is set, i.e. when the
+  // bookmarks & notes list needs every highlight's page.
+  void EnsureAnnotationSpans(bool allow_full_scan);
   std::string AnnotationFilePath();
 
   std::vector<Annotation> annotations_;
@@ -523,8 +523,7 @@ private:
   unsigned int annotation_spans_revision_ = 0;
   size_t annotation_spans_page_count_ = 0;
   const Page *annotation_spans_first_page_ = nullptr;
-  int selection_preview_begin_ = -1;
-  int selection_preview_end_ = -1;
+  bool annotation_full_scan_done_ = false;
   bool word_capture_enabled_ = false;
 };
 

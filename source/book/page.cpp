@@ -27,6 +27,7 @@
 
 #include "book/page.h"
 
+#include "book/annotation_text_utils.h"
 #include "book/book.h"
 #include "shared/screen_dimensions.h"
 #include "book/inline_image_layout.h"
@@ -128,11 +129,6 @@ bool IsDarkColorMode(Text *ts) {
 u16 HighlightTint(Text *ts) {
   return IsDarkColorMode(ts) ? 0x5A82 /* dark olive */
                              : 0xFF71 /* soft yellow */;
-}
-
-u16 SelectionTint(Text *ts) {
-  return IsDarkColorMode(ts) ? 0x29ED /* dark blue */
-                             : 0xAE7F /* light blue */;
 }
 
 bool BufIndexInRanges(const std::vector<Book::HighlightRange> &ranges,
@@ -272,26 +268,17 @@ void Page::Draw(Text *ts) {
   int active_link_render_index = -1;
   rendered_inline_links_.clear();
 
-  // Highlights and the in-progress selection are painted behind glyphs.
-  // Word boxes are only recorded while selection mode needs them.
+  // Saved highlights are painted behind glyphs. Word boxes are only recorded
+  // while selection mode needs them (it tints a copy of this page itself).
   rendered_words_.clear();
   std::vector<Book::HighlightRange> highlight_ranges;
-  int preview_begin = -1;
-  int preview_end = -1;
   bool capture_words = false;
   if (book && book->SupportsAnnotations()) {
     book->CollectHighlightRanges(this, &highlight_ranges);
-    const bool is_current = book->GetPageIndex(this) == book->GetPosition();
-    if (is_current) {
-      capture_words = book->IsWordCaptureEnabled();
-      if (!book->GetSelectionPreview(&preview_begin, &preview_end)) {
-        preview_begin = -1;
-        preview_end = -1;
-      }
-    }
+    capture_words = book->IsWordCaptureEnabled() &&
+                    book->GetPageIndex(this) == book->GetPosition();
   }
   const u16 highlight_tint = HighlightTint(ts);
-  const u16 selection_tint = SelectionTint(ts);
   int open_word = -1;
   int open_word_baseline = 0;
 
@@ -979,12 +966,10 @@ void Page::Draw(Text *ts) {
         glyph_style = TEXT_STYLE_BOLD;
 
       const int glyph_index = (int)i - 1;
-      const bool in_preview =
-          glyph_index >= preview_begin && glyph_index < preview_end;
       const bool in_highlight =
-          !in_preview && !highlight_ranges.empty() &&
+          !highlight_ranges.empty() &&
           BufIndexInRanges(highlight_ranges, glyph_index);
-      if (in_preview || in_highlight) {
+      if (in_highlight) {
         const int advance = (int)ts->GetAdvance(c, glyph_style);
         const int line_h = (int)ts->GetHeight();
         const int y0 = std::max(0, base_pen_y - line_h + 1);
@@ -993,7 +978,7 @@ void Page::Draw(Text *ts) {
         const int x1 = std::min(ts->LogicalWidth(), glyph_x0 + advance);
         if (advance > 0 && x1 > glyph_x0 && y1 > y0)
           ts->FillRect((u16)glyph_x0, (u16)y0, (u16)x1, (u16)y1,
-                       in_preview ? selection_tint : highlight_tint);
+                       highlight_tint);
       }
 
       ts->PrintChar(c, glyph_style);
@@ -1071,6 +1056,34 @@ void Page::Draw(Text *ts) {
   }
 
   flush_render_line("page-end");
+#ifdef DSLIBRIS_DEBUG
+  // The draw loop stops when the second screen is full. If the paginator
+  // put more text on this page than fits, that text is never shown (the
+  // next page starts after it), which reads as words missing between pages.
+  if (i < length) {
+    annotation_text_utils::VisibleText rest;
+    annotation_text_utils::ExtractVisibleText(buf + i, length - i, &rest);
+    std::string sample;
+    size_t visible = 0;
+    for (size_t k = 0; k < rest.chars.size(); k++) {
+      const u32 ch = rest.chars[k];
+      if (ch == ' ' || ch == '\n')
+        continue;
+      visible++;
+      if (sample.size() < 60)
+        sample.push_back(ch < 128 ? (char)ch : '?');
+    }
+    if (visible > 0) {
+      DBG_LOGF(ts->GetReporter(),
+               "PAGE draw dropped text page=%d/%d visible_chars=%u "
+               "pen_y=%d line_h=%d spacing=%d px=%d text=\"%s\"",
+               book ? book->GetPageIndex(this) + 1 : 0,
+               book ? (int)book->GetPageCount() : 0, (unsigned)visible,
+               (int)ts->GetPenY(), (int)ts->GetHeight(), ts->linespacing,
+               (int)ts->GetPixelSize(), sample.c_str());
+    }
+  }
+#endif
   if (in_preformatted_block)
     ts->SetClipToContentEnabled(saved_clip_to_content);
   ts->ClearTextColorOverride();

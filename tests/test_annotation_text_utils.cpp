@@ -214,6 +214,10 @@ void TestFallsBackToWholeBook() {
                        "needle", "", 0, 20, 20, PageBuffer, &pages, 3,
                        &spans));
   test::ExpectEq("far page", spans[0].page, 19);
+  test::ExpectFalse("window only",
+                    annotation_text_utils::ResolveAnchor(
+                        "needle", "", 0, 20, 20, PageBuffer, &pages, 3,
+                        &spans, false));
   test::ExpectFalse("missing quote",
                     annotation_text_utils::ResolveAnchor(
                         "haystack", "", 0, 20, 20, PageBuffer, &pages, 3,

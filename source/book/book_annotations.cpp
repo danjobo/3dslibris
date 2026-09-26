@@ -132,46 +132,74 @@ bool Book::RemoveAnnotation(uint32_t id) {
   return false;
 }
 
-void Book::EnsureAnnotationSpans() {
+namespace {
+
+bool ResolveAnnotation(Book *book, Annotation *a, size_t page_count,
+                       bool whole_book,
+                       std::vector<annotation_text_utils::ResolvedSpan> *out) {
+  if (!annotation_text_utils::ResolveAnchor(
+          a->quote, a->prefix, a->page_hint, a->page_count_hint,
+          (int)page_count, PageBufferForAnchor, book, kAnchorSearchWindow,
+          out, whole_book) ||
+      out->empty())
+    return false;
+  // Remember where it is now so the next resolve starts in the right place;
+  // persisted with the next save.
+  a->page_hint = (uint16_t)(*out)[0].page;
+  a->page_count_hint = (uint16_t)page_count;
+  return true;
+}
+
+} // namespace
+
+void Book::EnsureAnnotationSpans(bool allow_full_scan) {
   EnsureAnnotationsLoaded();
+  if (annotations_.empty()) {
+    annotation_spans_.clear();
+    return;
+  }
   const size_t page_count = pages.size();
   const Page *first_page = page_count ? pages[0] : NULL;
-  if (annotation_spans_valid_ &&
+  const bool cache_matches =
+      annotation_spans_valid_ &&
       annotation_spans_revision_ == layout_revision &&
       annotation_spans_page_count_ == page_count &&
-      annotation_spans_first_page_ == first_page)
-    return;
+      annotation_spans_first_page_ == first_page;
 
-  annotation_spans_.clear();
-  // Pages may still be arriving from the reflow worker; resolve once the
-  // open has finished.
-  if (page_count == 0 || IsAsyncReflowOpenPending())
-    return;
-
-  for (size_t i = 0; i < annotations_.size(); i++) {
-    Annotation &a = annotations_[i];
-    AnnotationSpans resolved;
-    resolved.id = a.id;
-    if (annotation_text_utils::ResolveAnchor(
-            a.quote, a.prefix, a.page_hint, a.page_count_hint,
-            (int)page_count, PageBufferForAnchor, this, kAnchorSearchWindow,
-            &resolved.spans) &&
-        !resolved.spans.empty()) {
-      // Remember where it is now so the next resolve starts in the right
-      // place; persisted with the next save.
-      a.page_hint = (uint16_t)resolved.spans[0].page;
-      a.page_count_hint = (uint16_t)page_count;
+  if (!cache_matches) {
+    annotation_spans_.clear();
+    annotation_full_scan_done_ = false;
+    // Pages may still be arriving from the reflow worker; resolve once the
+    // open has finished.
+    if (page_count == 0 || IsAsyncReflowOpenPending())
+      return;
+    for (size_t i = 0; i < annotations_.size(); i++) {
+      AnnotationSpans resolved;
+      resolved.id = annotations_[i].id;
+      ResolveAnnotation(this, &annotations_[i], page_count, false,
+                        &resolved.spans);
+      annotation_spans_.push_back(resolved);
     }
-    annotation_spans_.push_back(resolved);
+    annotation_spans_valid_ = true;
+    annotation_spans_revision_ = layout_revision;
+    annotation_spans_page_count_ = page_count;
+    annotation_spans_first_page_ = first_page;
   }
-  annotation_spans_valid_ = true;
-  annotation_spans_revision_ = layout_revision;
-  annotation_spans_page_count_ = page_count;
-  annotation_spans_first_page_ = first_page;
+
+  if (allow_full_scan && !annotation_full_scan_done_ &&
+      annotation_spans_valid_) {
+    annotation_full_scan_done_ = true;
+    for (size_t i = 0; i < annotation_spans_.size(); i++) {
+      if (!annotation_spans_[i].spans.empty() || i >= annotations_.size())
+        continue;
+      ResolveAnnotation(this, &annotations_[i], page_count, true,
+                        &annotation_spans_[i].spans);
+    }
+  }
 }
 
 int Book::GetAnnotationPage(uint32_t id) {
-  EnsureAnnotationSpans();
+  EnsureAnnotationSpans(true);
   for (size_t i = 0; i < annotation_spans_.size(); i++) {
     if (annotation_spans_[i].id == id)
       return annotation_spans_[i].spans.empty()
@@ -202,7 +230,7 @@ void Book::CollectHighlightRanges(const Page *page,
   const int page_index = GetPageIndex(page);
   if (page_index < 0)
     return;
-  EnsureAnnotationSpans();
+  EnsureAnnotationSpans(false);
   for (size_t i = 0; i < annotation_spans_.size(); i++) {
     const AnnotationSpans &entry = annotation_spans_[i];
     for (size_t s = 0; s < entry.spans.size(); s++) {
@@ -218,7 +246,7 @@ void Book::CollectHighlightRanges(const Page *page,
 }
 
 uint32_t Book::FindAnnotationAt(int page_index, int buf_index) {
-  EnsureAnnotationSpans();
+  EnsureAnnotationSpans(false);
   for (size_t i = 0; i < annotation_spans_.size(); i++) {
     const AnnotationSpans &entry = annotation_spans_[i];
     for (size_t s = 0; s < entry.spans.size(); s++) {
@@ -229,25 +257,4 @@ uint32_t Book::FindAnnotationAt(int page_index, int buf_index) {
     }
   }
   return 0;
-}
-
-void Book::SetSelectionPreview(int buf_begin, int buf_end) {
-  selection_preview_begin_ = buf_begin;
-  selection_preview_end_ = buf_end;
-}
-
-void Book::ClearSelectionPreview() {
-  selection_preview_begin_ = -1;
-  selection_preview_end_ = -1;
-}
-
-bool Book::GetSelectionPreview(int *buf_begin, int *buf_end) const {
-  if (selection_preview_begin_ < 0 ||
-      selection_preview_end_ <= selection_preview_begin_)
-    return false;
-  if (buf_begin)
-    *buf_begin = selection_preview_begin_;
-  if (buf_end)
-    *buf_end = selection_preview_end_;
-  return true;
 }

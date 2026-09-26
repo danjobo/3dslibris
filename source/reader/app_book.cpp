@@ -581,7 +581,6 @@ void ReaderController::CloseBook()
   if (bookcurrent_)
   {
     bookcurrent_->SetWordCaptureEnabled(false);
-    bookcurrent_->ClearSelectionPreview();
     TryPersistProgress(bookcurrent_, true);
     DBG_LOGF(&app_, "BOOK close current session=%u book=%s",
              app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_));

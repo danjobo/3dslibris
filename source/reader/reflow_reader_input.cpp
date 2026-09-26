@@ -12,6 +12,8 @@
 #include "reader/reflow_reader_input.h"
 
 #include <3ds.h>
+#include <algorithm>
+#include <string.h>
 
 #include "app/app.h"
 #include "book/book.h"
@@ -24,6 +26,7 @@
 #include "ui/button.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
+#include "shared/orientation_utils.h"
 #include "ui/text.h"
 #include "ui/ui_button_skin.h"
 
@@ -270,28 +273,165 @@ static int PopupOptionAt(Text *ts, int x, int y) {
   return -1;
 }
 
-// Pushes the current selection into the book and redraws the page (and the
-// popup on top of it, if open).
+// Selection feedback is drawn on a copy of the rendered page instead of
+// re-rendering it: a full page draw is far too slow on Old 3DS to follow the
+// D-pad or a stylus drag. Saved highlights are part of the copy.
+static std::vector<u16> s_snapshot_left;
+static std::vector<u16> s_snapshot_right;
+
+static const u16 kSelectionTintLight = 0xAE7F; // light blue
+static const u16 kSelectionTintDark = 0x2A1F;  // blue
+static const u16 kCursorColor = 0xF800;        // red underline
+
+static bool IsDarkTheme(Text *ts) {
+  const int mode = ts->GetColorMode();
+  return mode == 1 || mode == 4 || mode == 5;
+}
+
+static size_t ScreenBufferPixels(Text *ts) {
+  return (size_t)ts->BufferStride() * (size_t)ts->BufferStride();
+}
+
+static void TakePageSnapshot(Text *ts) {
+  const size_t pixels = ScreenBufferPixels(ts);
+  s_snapshot_left.assign(ts->screenleft, ts->screenleft + pixels);
+  s_snapshot_right.assign(ts->screenright, ts->screenright + pixels);
+}
+
+static void ReleasePageSnapshot() {
+  std::vector<u16>().swap(s_snapshot_left);
+  std::vector<u16>().swap(s_snapshot_right);
+}
+
+static void RestorePageSnapshot(Text *ts) {
+  const size_t pixels = ScreenBufferPixels(ts);
+  if (s_snapshot_left.size() != pixels || s_snapshot_right.size() != pixels)
+    return;
+  memcpy(ts->screenleft, s_snapshot_left.data(), pixels * sizeof(u16));
+  memcpy(ts->screenright, s_snapshot_right.data(), pixels * sizeof(u16));
+}
+
+// Buffer holding a reading screen (0 or 1) for the book's orientation.
+static u16 *ReadingScreenBuffer(Book *book, Text *ts, int screen_index) {
+  const bool first_is_left = orientation_utils::FirstScreenIsLeft(
+      (unsigned char)book->GetOrientation());
+  const bool left = (screen_index == 0) == first_is_left;
+  return left ? ts->screenleft : ts->screenright;
+}
+
+static void TintBufferRect(Text *ts, u16 *buf, bool is_left, int x0, int y0,
+                           int x1, int y1, u16 tint, bool dark) {
+  const int stride = ts->BufferStride();
+  x0 = std::max(0, x0);
+  y0 = std::max(0, y0);
+  x1 = std::min(ts->LogicalWidthFor(is_left), x1);
+  y1 = std::min(ts->LogicalHeightFor(is_left), y1);
+  for (int y = y0; y < y1; y++) {
+    u16 *row = buf + y * stride;
+    for (int x = x0; x < x1; x++)
+      row[x] = text_selection_utils::TintPixel565(row[x], tint, dark);
+  }
+}
+
+static void FillBufferRect(Text *ts, u16 *buf, bool is_left, int x0, int y0,
+                           int x1, int y1, u16 color) {
+  const int stride = ts->BufferStride();
+  x0 = std::max(0, x0);
+  y0 = std::max(0, y0);
+  x1 = std::min(ts->LogicalWidthFor(is_left), x1);
+  y1 = std::min(ts->LogicalHeightFor(is_left), y1);
+  for (int y = y0; y < y1; y++) {
+    u16 *row = buf + y * stride;
+    for (int x = x0; x < x1; x++)
+      row[x] = color;
+  }
+}
+
+static void TintSelectedWords(Book *book, Text *ts,
+                              const std::vector<WordBox> &words, int first,
+                              int last) {
+  const u16 tint = IsDarkTheme(ts) ? kSelectionTintDark : kSelectionTintLight;
+  const bool dark = IsDarkTheme(ts);
+  for (int i = first; i <= last && i < (int)words.size(); i++) {
+    const WordBox &w = words[(size_t)i];
+    u16 *buf = ReadingScreenBuffer(book, ts, w.screen_index);
+    const bool is_left = buf == ts->screenleft;
+    int x1 = w.bounds.x1;
+    // Also tint the gap to the next selected word on the same line.
+    if (i < last && i + 1 < (int)words.size()) {
+      const WordBox &next = words[(size_t)i + 1];
+      if (next.screen_index == w.screen_index && next.bounds.y0 == w.bounds.y0 &&
+          next.bounds.x0 > w.bounds.x1)
+        x1 = next.bounds.x0;
+    }
+    TintBufferRect(ts, buf, is_left, w.bounds.x0, w.bounds.y0, x1,
+                   w.bounds.y1, tint, dark);
+  }
+}
+
+static void DrawCursorUnderline(Book *book, Text *ts, const WordBox &w) {
+  u16 *buf = ReadingScreenBuffer(book, ts, w.screen_index);
+  FillBufferRect(ts, buf, buf == ts->screenleft, w.bounds.x0, w.bounds.y1,
+                 w.bounds.x1, w.bounds.y1 + 2, kCursorColor);
+}
+
+static text_selection_utils::MirrorMap TopMirrorMap(Text *ts) {
+  return text_selection_utils::BuildMirrorMap(
+      ts->LogicalWidthFor(true), ts->LogicalHeightFor(true),
+      ts->LogicalWidthFor(false), ts->LogicalHeightFor(false));
+}
+
+// Paints a scaled copy of the top screen onto the touch screen.
+static void DrawTopMirror(Text *ts) {
+  const text_selection_utils::MirrorMap map = TopMirrorMap(ts);
+  if (map.draw_w <= 0 || map.draw_h <= 0)
+    return;
+  const int stride = ts->BufferStride();
+  const u16 *src = ts->screenleft;
+  u16 *dst = ts->screenright;
+  const u16 background = src[0];
+  FillBufferRect(ts, dst, false, 0, 0, map.dst_w, map.dst_h, background);
+  std::vector<int> src_x((size_t)map.draw_w);
+  for (int x = 0; x < map.draw_w; x++)
+    src_x[(size_t)x] = (int)((long)x * map.src_w / map.draw_w);
+  for (int y = 0; y < map.draw_h; y++) {
+    const int sy = (int)((long)y * map.src_h / map.draw_h);
+    const u16 *src_row = src + sy * stride;
+    u16 *dst_row = dst + (y + map.off_y) * stride + map.off_x;
+    for (int x = 0; x < map.draw_w; x++)
+      dst_row[x] = src_row[src_x[(size_t)x]];
+  }
+}
+
+// Repaints selection feedback from the page snapshot: tinted range, cursor
+// underline, optional top-screen mirror, and the action popup.
 static void RedrawSelection(App &app, Book *book, Text *ts) {
   TextSelectionState &sel = app.MutableTextSelection();
+  RestorePageSnapshot(ts);
   const std::vector<WordBox> *words = CurrentPageWords(book);
-  int begin = 0;
-  int end = 0;
-  if (sel.active && words &&
-      text_selection_utils::SelectionBufRange(*words, sel.anchor, sel.cursor,
-                                              &begin, &end))
-    book->SetSelectionPreview(begin, end);
-  else
-    book->ClearSelectionPreview();
-  book_nav::DrawPage(book, ts);
+  if (words && !words->empty() && sel.cursor >= 0 &&
+      sel.cursor < (int)words->size()) {
+    const int first = sel.anchor >= 0 ? std::min(sel.anchor, sel.cursor)
+                                      : sel.cursor;
+    const int last = sel.anchor >= 0 ? std::max(sel.anchor, sel.cursor)
+                                     : sel.cursor;
+    TintSelectedWords(book, ts, *words, first, last);
+    DrawCursorUnderline(book, ts, (*words)[(size_t)sel.cursor]);
+  }
+  if (sel.mirror_top)
+    DrawTopMirror(ts);
   DrawSelectionPopup(app, ts);
+  ts->MarkScreenDirty(ts->screenleft);
+  ts->MarkScreenDirty(ts->screenright);
+  // The status bar is drawn over the page; the snapshot predates it.
+  app.RequestStatusRedraw();
 }
 
 static void ExitSelectionMode(App &app, Book *book, Text *ts) {
   app.MutableTextSelection().ResetSelection();
+  ReleasePageSnapshot();
   if (book) {
     book->SetWordCaptureEnabled(false);
-    book->ClearSelectionPreview();
     book_nav::DrawPage(book, ts);
   }
   app.RequestStatusRedraw();
@@ -303,9 +443,8 @@ static bool EnterSelectionMode(App &app, Book *book, Text *ts) {
   TextSelectionState &sel = app.MutableTextSelection();
   sel.ResetSelection();
   sel.active = true;
-  book->ClearSelectionPreview();
   book->SetWordCaptureEnabled(true);
-  // Redraw once to record word boxes for this page.
+  // One full draw records the word boxes; everything after works on a copy.
   book_nav::DrawPage(book, ts);
   const std::vector<WordBox> *words = CurrentPageWords(book);
   if (!words || words->empty()) {
@@ -313,9 +452,9 @@ static bool EnterSelectionMode(App &app, Book *book, Text *ts) {
     app.PrintStatus("No text to select on this page");
     return false;
   }
+  TakePageSnapshot(ts);
   sel.cursor = 0;
   RedrawSelection(app, book, ts);
-  app.RequestStatusRedraw();
   return true;
 }
 
@@ -405,10 +544,68 @@ static void MoveCursorTo(App &app, Book *book, Text *ts, int word) {
   RedrawSelection(app, book, ts);
 }
 
+static const uint64_t kCursorRepeatDelayMs = 350;
+static const uint64_t kCursorRepeatIntervalMs = 80;
+
+// Direction on the page currently pressed (new press or held), mapped from
+// the physical D-pad / Circle Pad through the reading orientation.
+static text_selection_utils::ScreenDirection PressedDirection(App &app,
+                                                              Book *book,
+                                                              uint32_t bits) {
+  return text_selection_utils::PhysicalToScreenDirection(
+      (unsigned char)book->GetOrientation(),
+      (bits & (app.key.dup | app.key.up)) != 0,
+      (bits & (app.key.ddown | app.key.down)) != 0,
+      (bits & (app.key.dleft | app.key.left)) != 0,
+      (bits & (app.key.dright | app.key.right)) != 0);
+}
+
+static int CursorTarget(const std::vector<WordBox> &words, int cursor,
+                        text_selection_utils::ScreenDirection dir) {
+  using text_selection_utils::ScreenDirection;
+  switch (dir) {
+  case ScreenDirection::Left:
+    return text_selection_utils::StepWord((int)words.size(), cursor, -1);
+  case ScreenDirection::Right:
+    return text_selection_utils::StepWord((int)words.size(), cursor, 1);
+  case ScreenDirection::Up:
+    return text_selection_utils::VerticalNeighbor(words, cursor, false);
+  case ScreenDirection::Down:
+    return text_selection_utils::VerticalNeighbor(words, cursor, true);
+  default:
+    return -1;
+  }
+}
+
+// Word under a touch point, looking through the top-screen mirror if shown.
+static int TouchedWord(App &app, Book *book, Text *ts,
+                       const std::vector<WordBox> &words,
+                       const FrameInput &input) {
+  const TextSelectionState &sel = app.MutableTextSelection();
+  const touchPosition mapped = app.MapTouch(input);
+  const unsigned char orientation = (unsigned char)book->GetOrientation();
+  const uint8_t touch_index = text_selection_utils::TouchScreenIndex(orientation);
+  if (!sel.mirror_top)
+    return text_selection_utils::WordAtPoint(words, touch_index, mapped.px,
+                                             mapped.py, kTouchWordPadPx);
+  const text_selection_utils::MirrorMap map = TopMirrorMap(ts);
+  int sx = 0;
+  int sy = 0;
+  if (!text_selection_utils::MirrorDstToSrc(map, mapped.px, mapped.py, &sx,
+                                            &sy))
+    return -1;
+  // Scale the finger padding up to top-screen pixels.
+  const int pad = map.draw_h > 0 ? kTouchWordPadPx * map.src_h / map.draw_h
+                                 : kTouchWordPadPx;
+  return text_selection_utils::WordAtPoint(words, (uint8_t)(1 - touch_index),
+                                           sx, sy, pad);
+}
+
 // Handles one frame of input while selection mode is active. Always
 // consumes the input.
 static bool HandleSelectionInput(App &app, Book *book, Text *ts,
                                  const FrameInput &input) {
+  using text_selection_utils::ScreenDirection;
   TextSelectionState &sel = app.MutableTextSelection();
   const uint32_t keys = input.keys_down;
   const uint32_t held = input.keys_held;
@@ -418,19 +615,18 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     return true;
   }
   const int word_count = (int)words->size();
+  const ScreenDirection pressed = PressedDirection(app, book, keys);
 
   if (sel.popup != SelectionPopup::None) {
     if (keys & app.key.a) {
       RunPopupOption(app, book, ts, sel.popup_index);
     } else if (keys & app.key.b) {
       ClosePopup(app, book, ts);
-    } else if (keys & (app.key.dup | app.key.up)) {
+    } else if (pressed == ScreenDirection::Up ||
+               pressed == ScreenDirection::Down) {
       sel.popup_index = text_selection_utils::StepPopupIndex(
-          kPopupOptionCount, sel.popup_index, -1);
-      RedrawSelection(app, book, ts);
-    } else if (keys & (app.key.ddown | app.key.down)) {
-      sel.popup_index = text_selection_utils::StepPopupIndex(
-          kPopupOptionCount, sel.popup_index, 1);
+          kPopupOptionCount, sel.popup_index,
+          pressed == ScreenDirection::Up ? -1 : 1);
       RedrawSelection(app, book, ts);
     } else if (keys & KEY_TOUCH) {
       const touchPosition mapped = app.MapTouch(input);
@@ -445,9 +641,7 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
 
   // Touch drag: select from the touched word to the word under the finger.
   if (keys & KEY_TOUCH) {
-    const touchPosition mapped = app.MapTouch(input);
-    const int word = text_selection_utils::WordAtPoint(
-        *words, 1, mapped.px, mapped.py, kTouchWordPadPx);
+    const int word = TouchedWord(app, book, ts, *words, input);
     if (word >= 0) {
       sel.anchor = word;
       sel.cursor = word;
@@ -458,10 +652,7 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
   }
   if (sel.touch_dragging) {
     if (held & KEY_TOUCH) {
-      const touchPosition mapped = app.MapTouch(input);
-      MoveCursorTo(app, book, ts,
-                   text_selection_utils::WordAtPoint(
-                       *words, 1, mapped.px, mapped.py, kTouchWordPadPx));
+      MoveCursorTo(app, book, ts, TouchedWord(app, book, ts, *words, input));
     } else {
       sel.touch_dragging = false;
       OpenPopupForSelection(app, book, ts);
@@ -469,11 +660,27 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     return true;
   }
 
+  // Cursor movement, repeating while a direction is held.
+  const ScreenDirection held_dir = PressedDirection(app, book, held);
+  const uint64_t now_ms = input.timestamp_ms;
+  if (pressed != ScreenDirection::None) {
+    sel.repeat_direction = pressed;
+    sel.repeat_next_ms = now_ms + kCursorRepeatDelayMs;
+    MoveCursorTo(app, book, ts, CursorTarget(*words, sel.cursor, pressed));
+    return true;
+  }
+  if (held_dir == ScreenDirection::None || held_dir != sel.repeat_direction) {
+    sel.repeat_direction = ScreenDirection::None;
+  } else if (now_ms >= sel.repeat_next_ms) {
+    sel.repeat_next_ms = now_ms + kCursorRepeatIntervalMs;
+    MoveCursorTo(app, book, ts, CursorTarget(*words, sel.cursor, held_dir));
+    return true;
+  }
+
   if (keys & app.key.a) {
     if (sel.anchor < 0 && !HighlightUnderCursor(book, sel)) {
       sel.anchor = sel.cursor;
       RedrawSelection(app, book, ts);
-      app.RequestStatusRedraw();
     } else {
       OpenPopupForSelection(app, book, ts);
     }
@@ -481,24 +688,13 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     if (sel.anchor >= 0) {
       sel.anchor = -1;
       RedrawSelection(app, book, ts);
-      app.RequestStatusRedraw();
     } else {
       ExitSelectionMode(app, book, ts);
     }
-  } else if (keys & (app.key.dleft | app.key.left)) {
-    MoveCursorTo(app, book, ts,
-                 text_selection_utils::StepWord(word_count, sel.cursor, -1));
-  } else if (keys & (app.key.dright | app.key.right)) {
-    MoveCursorTo(app, book, ts,
-                 text_selection_utils::StepWord(word_count, sel.cursor, 1));
-  } else if (keys & (app.key.dup | app.key.up)) {
-    MoveCursorTo(app, book, ts,
-                 text_selection_utils::VerticalNeighbor(*words, sel.cursor,
-                                                        false));
-  } else if (keys & (app.key.ddown | app.key.down)) {
-    MoveCursorTo(app, book, ts,
-                 text_selection_utils::VerticalNeighbor(*words, sel.cursor,
-                                                        true));
+  } else if (keys & app.key.y) {
+    // Show the top screen on the touch screen so its words can be touched.
+    sel.mirror_top = !sel.mirror_top;
+    RedrawSelection(app, book, ts);
   } else if (keys & app.key.l) {
     MoveCursorTo(app, book, ts, 0);
   } else if (keys & app.key.r) {

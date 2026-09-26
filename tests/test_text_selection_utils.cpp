@@ -108,9 +108,91 @@ void TestResetSelection() {
   test::ExpectTrue("hold state untouched", state.x_hold_armed);
 }
 
+void TestPhysicalToScreenDirection() {
+  using text_selection_utils::PhysicalToScreenDirection;
+  using text_selection_utils::ScreenDirection;
+  const unsigned char kLeft = 0, kRight = 1, kLandscape = 2;
+  // Landscape: no rotation.
+  test::ExpectTrue("landscape left",
+                   PhysicalToScreenDirection(kLandscape, false, false, true,
+                                             false) == ScreenDirection::Left);
+  // Turned left: console top points to the reader's left.
+  test::ExpectTrue("turned-left up is page left",
+                   PhysicalToScreenDirection(kLeft, true, false, false,
+                                             false) == ScreenDirection::Left);
+  test::ExpectTrue("turned-left down is page right",
+                   PhysicalToScreenDirection(kLeft, false, true, false,
+                                             false) == ScreenDirection::Right);
+  test::ExpectTrue("turned-left left is page down",
+                   PhysicalToScreenDirection(kLeft, false, false, true,
+                                             false) == ScreenDirection::Down);
+  test::ExpectTrue("turned-left right is page up",
+                   PhysicalToScreenDirection(kLeft, false, false, false,
+                                             true) == ScreenDirection::Up);
+  // Turned right mirrors it.
+  test::ExpectTrue("turned-right up is page right",
+                   PhysicalToScreenDirection(kRight, true, false, false,
+                                             false) == ScreenDirection::Right);
+  test::ExpectTrue("turned-right left is page up",
+                   PhysicalToScreenDirection(kRight, false, false, true,
+                                             false) == ScreenDirection::Up);
+  test::ExpectTrue("nothing pressed",
+                   PhysicalToScreenDirection(kLeft, false, false, false,
+                                             false) == ScreenDirection::None);
+}
+
+void TestTouchScreenIndex() {
+  test::ExpectEq("turned left", text_selection_utils::TouchScreenIndex(0), 1);
+  test::ExpectEq("turned right", text_selection_utils::TouchScreenIndex(1), 0);
+  test::ExpectEq("landscape", text_selection_utils::TouchScreenIndex(2), 1);
+}
+
+void TestTintPixel() {
+  using text_selection_utils::TintPixel565;
+  // Light theme multiply: white takes the tint, black stays black.
+  test::ExpectEqU("white becomes tint", TintPixel565(0xFFFF, 0xFF71, false),
+                  0xFF71);
+  test::ExpectEqU("black stays black", TintPixel565(0x0000, 0xFF71, false),
+                  0x0000);
+  // Dark theme blend: halfway between pixel and tint.
+  test::ExpectEqU("dark blend", TintPixel565(0x0000, 0xF81F, true),
+                  (15u << 11) | 15u);
+}
+
+void TestMirrorMap() {
+  // Portrait: 240x400 top screen onto the 240x320 touch screen.
+  text_selection_utils::MirrorMap portrait =
+      text_selection_utils::BuildMirrorMap(240, 400, 240, 320);
+  test::ExpectEq("portrait draw w", portrait.draw_w, 192);
+  test::ExpectEq("portrait draw h", portrait.draw_h, 320);
+  test::ExpectEq("portrait off x", portrait.off_x, 24);
+  test::ExpectEq("portrait off y", portrait.off_y, 0);
+  int sx = 0, sy = 0;
+  test::ExpectTrue("inside", text_selection_utils::MirrorDstToSrc(
+                                 portrait, 24 + 96, 160, &sx, &sy));
+  test::ExpectEq("center x", sx, 120);
+  test::ExpectEq("center y", sy, 200);
+  test::ExpectFalse("left margin", text_selection_utils::MirrorDstToSrc(
+                                       portrait, 10, 160, &sx, &sy));
+
+  // Landscape: 400x240 onto 320x240.
+  text_selection_utils::MirrorMap landscape =
+      text_selection_utils::BuildMirrorMap(400, 240, 320, 240);
+  test::ExpectEq("landscape draw w", landscape.draw_w, 320);
+  test::ExpectEq("landscape draw h", landscape.draw_h, 192);
+  test::ExpectEq("landscape off y", landscape.off_y, 24);
+  test::ExpectTrue("corner", text_selection_utils::MirrorDstToSrc(
+                                 landscape, 319, 24 + 191, &sx, &sy));
+  test::ExpectTrue("corner in range", sx < 400 && sy < 240);
+}
+
 } // namespace
 
 int main() {
+  TestPhysicalToScreenDirection();
+  TestTouchScreenIndex();
+  TestTintPixel();
+  TestMirrorMap();
   TestStepWord();
   TestVerticalNeighbor();
   TestWordAtPoint();

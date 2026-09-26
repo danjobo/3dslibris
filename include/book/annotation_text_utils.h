@@ -60,10 +60,11 @@ typedef bool (*PageBufferFn)(void *ctx, int page, const uint32_t **buf,
 // Finds the quote in the book, preferring pages near the remapped hint and
 // occurrences whose preceding text matches the stored prefix. A quote may
 // cross into the following page, producing two spans. Searches +/- window
-// pages first, then the whole book.
+// pages first, then (if whole_book_fallback) the rest of the book.
 bool ResolveAnchor(const std::string &quote, const std::string &prefix,
                    int page_hint, int page_count_hint, int page_count,
                    PageBufferFn page_buffer, void *ctx, int window,
-                   std::vector<ResolvedSpan> *out);
+                   std::vector<ResolvedSpan> *out,
+                   bool whole_book_fallback = true);
 
 } // namespace annotation_text_utils

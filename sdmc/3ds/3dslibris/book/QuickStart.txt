@@ -71,10 +71,13 @@ Bookmarks:
 
 Highlights & notes:
 - Hold X: enter selection mode (short X press still cycles the theme)
-- D-Pad: move the word cursor (Up/Down moves between lines and screens)
+- D-Pad: move the word cursor, as the page looks to you: left/right by
+  word, up/down by line and across screens. Hold to keep moving.
 - L / R: jump to the first / last word on the page
 - A: mark where the selection starts, move, then A again to finish
 - Touch: drag across words on the touch screen to select them
+- Y: show a copy of the top screen on the touch screen, so you can
+  select its text by touch too (press Y again to go back)
 - After selecting, choose Highlight, Highlight + note, or Cancel
 - Put the cursor on an existing highlight and press A to edit its note
   or delete it

@@ -372,7 +372,7 @@ int RemapPageHint(int page_hint, int page_count_hint, int page_count) {
 bool ResolveAnchor(const std::string &quote, const std::string &prefix,
                    int page_hint, int page_count_hint, int page_count,
                    PageBufferFn page_buffer, void *ctx, int window,
-                   std::vector<ResolvedSpan> *out) {
+                   std::vector<ResolvedSpan> *out, bool whole_book_fallback) {
   if (!out)
     return false;
   out->clear();
@@ -395,7 +395,7 @@ bool ResolveAnchor(const std::string &quote, const std::string &prefix,
     SearchPage(page, page_count, center, quote_cps, prefix_cps, page_buffer,
                ctx, &best);
 
-  if (!best.found) {
+  if (!best.found && whole_book_fallback) {
     for (int page = 0; page < page_count; page++) {
       if (page >= lo && page <= hi)
         continue;
