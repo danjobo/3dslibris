@@ -80,40 +80,63 @@ void App::AptHookCallback(APT_HookType hook, void *param)
     app->HandleAppletHook(hook);
 }
 
-void App::HandleAppletHook(APT_HookType hook)
+namespace
 {
-  // Do NOT log here. This callback runs on the APT system thread, not the main
-  // thread. Calling DBG_LOGF would access nav_/reader_state_ without
-  // synchronization and would invoke PrintStatus, which does LightLock + fflush
-  // (SD card I/O) from the hook thread — the same class of bug documented in
-  // the APTHOOK_ONEXIT comment below. Lifecycle events are logged in
-  // HandleAppletSuspend/HandleAppletResume on the main thread instead.
+
+app_lifecycle_utils::AptEvent ToAptEvent(APT_HookType hook)
+{
   switch (hook)
   {
   case APTHOOK_ONSUSPEND:
-    // Signal suspend state to the main thread. All browser/reader mutations
-    // are deferred to HandleAppletSuspend() on the main thread to avoid
-    // cross-thread writes to nav_ and reader state, and to avoid dereferencing
-    // Book pointers from the APT hook thread.
-    lifecycle_state_.SetSuspended(true);
-    lifecycle_state_.SetResumePending(false);
-    lifecycle_state_.SetSuspendHandled(false);
-    break;
+    return app_lifecycle_utils::AptEvent::Suspend;
   case APTHOOK_ONRESTORE:
+    return app_lifecycle_utils::AptEvent::Restore;
+  case APTHOOK_ONSLEEP:
+    return app_lifecycle_utils::AptEvent::Sleep;
   case APTHOOK_ONWAKEUP:
-    lifecycle_state_.SetSuspended(false);
-    lifecycle_state_.SetResumePending(true);
-    break;
+    return app_lifecycle_utils::AptEvent::Wakeup;
   case APTHOOK_ONEXIT:
-    // Only set the quit flag here. PersistPrefs() writes to the SD card and
-    // must NOT run inside an APT hook callback — doing so blocks the HOME Menu
-    // from receiving the acknowledgment within its expected timing window,
-    // which can cause the HOME Menu process to crash. Prefs are saved in
-    // PrepareForShutdown() after aptMainLoop() returns.
-    lifecycle_state_.SetExitRequested(true);
-    break;
+    return app_lifecycle_utils::AptEvent::Exit;
   default:
-    break;
+    return app_lifecycle_utils::AptEvent::Other;
+  }
+}
+
+} // namespace
+
+void App::HandleAppletHook(APT_HookType hook)
+{
+  // Do NOT log or touch the SD card here. libctru calls hooks from inside
+  // aptMainLoop() while the system waits for this app to acknowledge the
+  // transition (for ONSLEEP, APT_ReplySleepNotificationComplete runs right
+  // after the hook returns). PersistPrefs()/DBG_LOGF here have previously
+  // delayed that acknowledgment past the HOME Menu's timing window and crashed
+  // it. Lifecycle events are logged in HandleAppletSuspend/HandleAppletResume
+  // instead, and prefs are saved in PrepareForShutdown() on exit.
+  const app_lifecycle_utils::AptEvent event = ToAptEvent(hook);
+  lifecycle_state_.Apply(
+      app_lifecycle_utils::ApplyAptEvent(lifecycle_state_.Snapshot(), event));
+
+  // Sleep is handled entirely inside aptMainLoop() (ONSLEEP, acknowledge,
+  // block until wake, ONWAKEUP), so no main-loop frame runs between sleep and
+  // wake. Stop the core-1 workers now; leaving them alive across sleep can
+  // hang the console on wake, the same failure class as across HOME.
+  if (app_lifecycle_utils::ShouldQuiesceWorkersInHook(event))
+    QuiesceWorkersForSleep();
+}
+
+void App::QuiesceWorkersForSleep()
+{
+  // Signal-only: no joins, logging, or SD I/O (see HandleAppletHook). The
+  // sleep catch-up in HandleAppletResume() finishes the teardown on wake.
+  Book *current = reader_state_.bookcurrent;
+  Book *opening = reader_state_.opening.book;
+  if (current)
+    current->SignalBackgroundWorkersShutdown();
+  if (opening && opening != current)
+  {
+    opening->RequestAbortOpen();
+    opening->SignalBackgroundWorkersShutdown();
   }
 }
 
@@ -158,6 +181,18 @@ void App::HandleAppletResume()
 {
   if (!lifecycle_state_.IsResumePending())
     return;
+  const bool from_sleep = lifecycle_state_.IsSleepCatchupPending();
+  if (from_sleep)
+  {
+    // The workers were only signaled inside ONSLEEP. Run the regular suspend
+    // cleanup now (progress save, fixed-layout worker joins, cancelling an
+    // in-flight open) so the resume below starts from a consistent state.
+    lifecycle_state_.SetSleepCatchupPending(false);
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOG(this, "APPLET woke from sleep: running suspend catch-up");
+#endif
+    HandleAppletSuspend();
+  }
   lifecycle_state_.SetResumePending(false);
   lifecycle_state_.SetSuspendHandled(false);
   nav_.browser.wait_input_release = true;

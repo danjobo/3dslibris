@@ -406,6 +406,7 @@ private:
   void InitScreens();
   static void AptHookCallback(APT_HookType hook, void *param);
   void HandleAppletHook(APT_HookType hook);
+  void QuiesceWorkersForSleep();
   void OnReaderAppletSuspendRequested();
   void OnReaderAppletSuspended();
   void OnReaderAppletResumed();

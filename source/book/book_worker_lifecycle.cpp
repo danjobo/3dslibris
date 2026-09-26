@@ -46,6 +46,16 @@ void Book::SuspendFixedLayoutWorkers() {
   ClearInlineImageCache();
 }
 
+void Book::SignalBackgroundWorkersShutdown() {
+  SignalReflowWorkerShutdown();
+  if (IsPdf() && mupdf_state && mupdf_state->worker) {
+    SignalMuPdfWorkerShutdown(mupdf_state);
+    mupdf_state->worker_init_attempted = false;
+  }
+  if (IsCbz() && cbz_state)
+    SignalCbzWorkerShutdown(cbz_state);
+}
+
 void Book::ReleaseMuPdfMemoryForSuspend() {
   if (IsPdf() && mupdf_state)
     ReleaseMuPdfMemoryForSuspendImpl(mupdf_state);

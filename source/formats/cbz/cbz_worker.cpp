@@ -176,6 +176,14 @@ void InitCbzWorker(Book::CbzState *cbz_state) {
   }
 }
 
+void SignalCbzWorkerShutdown(Book::CbzState *cbz_state) {
+  if (!cbz_state || !cbz_state->worker)
+    return;
+  __atomic_store_n(&cbz_state->worker->shutdown_requested, true,
+                   __ATOMIC_RELEASE);
+  LightEvent_Signal(&cbz_state->worker->submit_event);
+}
+
 void ShutdownCbzWorker(Book::CbzState *cbz_state) {
   if (!cbz_state || !cbz_state->worker)
     return;

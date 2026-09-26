@@ -3,13 +3,19 @@
 #include <3ds.h>
 #include <atomic>
 
+#include "shared/app_lifecycle_utils.h"
+
 // AppLifecycleState holds minimal lifecycle and APT hook state.
 // All members are private with inline getters/setters.
 // Must never be copied or assigned — access via App::lifecycle_state_ only.
 
 struct AppLifecycleState {
 private:
-    std::atomic<bool> applet_suspended_{false};
+    // HOME/applet suspend and console sleep are tracked separately so a sleep
+    // that happens while HOME is open does not resume the app on wake.
+    std::atomic<bool> applet_home_suspended_{false};
+    std::atomic<bool> applet_sleeping_{false};
+    std::atomic<bool> applet_sleep_catchup_pending_{false};
     std::atomic<bool> applet_resume_pending_{false};
     std::atomic<bool> applet_suspend_handled_{false};
     std::atomic<bool> applet_exit_requested_{false};
@@ -29,7 +35,11 @@ public:
 
     // Getters (cross-thread reads use relaxed ordering)
     bool IsSuspended() const {
-        return applet_suspended_.load(std::memory_order_relaxed);
+        return applet_home_suspended_.load(std::memory_order_relaxed) ||
+               applet_sleeping_.load(std::memory_order_relaxed);
+    }
+    bool IsSleepCatchupPending() const {
+        return applet_sleep_catchup_pending_.load(std::memory_order_relaxed);
     }
     bool IsResumePending() const {
         return applet_resume_pending_.load(std::memory_order_relaxed);
@@ -47,14 +57,39 @@ public:
     // Abort work if suspended or quitting (mode passed as AppMode enum).
     bool ShouldAbortWork(u8 mode) const {
         // Quit mode value is 7 (AppMode::Quit).
-        return applet_suspended_.load(std::memory_order_relaxed) ||
+        return IsSuspended() ||
                applet_exit_requested_.load(std::memory_order_relaxed) ||
                (mode == 7u);
     }
 
+    app_lifecycle_utils::LifecycleFlags Snapshot() const {
+        app_lifecycle_utils::LifecycleFlags flags;
+        flags.home_suspended =
+            applet_home_suspended_.load(std::memory_order_relaxed);
+        flags.sleeping = applet_sleeping_.load(std::memory_order_relaxed);
+        flags.resume_pending = IsResumePending();
+        flags.suspend_handled = IsSuspendHandled();
+        flags.exit_requested = IsExitRequested();
+        flags.sleep_catchup_pending = IsSleepCatchupPending();
+        return flags;
+    }
+    void Apply(const app_lifecycle_utils::LifecycleFlags &flags) {
+        applet_home_suspended_.store(flags.home_suspended,
+                                     std::memory_order_relaxed);
+        applet_sleeping_.store(flags.sleeping, std::memory_order_relaxed);
+        applet_resume_pending_.store(flags.resume_pending,
+                                     std::memory_order_relaxed);
+        applet_suspend_handled_.store(flags.suspend_handled,
+                                      std::memory_order_relaxed);
+        applet_exit_requested_.store(flags.exit_requested,
+                                     std::memory_order_relaxed);
+        applet_sleep_catchup_pending_.store(flags.sleep_catchup_pending,
+                                            std::memory_order_relaxed);
+    }
+
     // Mutators (cross-thread writes use relaxed ordering)
-    void SetSuspended(bool v) {
-        applet_suspended_.store(v, std::memory_order_relaxed);
+    void SetSleepCatchupPending(bool v) {
+        applet_sleep_catchup_pending_.store(v, std::memory_order_relaxed);
     }
     void SetResumePending(bool v) {
         applet_resume_pending_.store(v, std::memory_order_relaxed);
