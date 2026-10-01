@@ -83,7 +83,7 @@ static void ToggleClockFormatSetting(Prefs *prefs) {
   if (!prefs)
     return;
   prefs->time24h = settings::ToggleSetting(prefs->time24h);
-  prefs->Write();
+  prefs->RequestWrite();
 }
 
 static void ToggleReopenLastBookSetting(App *app) {
@@ -91,7 +91,7 @@ static void ToggleReopenLastBookSetting(App *app) {
     return;
   app->reopen = settings::ToggleSetting(app->reopen);
   if (app->prefs)
-    app->prefs->Write();
+    app->prefs->RequestWrite();
 }
 
 static void CycleColorMode(Text *ts, App *app) {
@@ -122,7 +122,7 @@ static void ToggleBrowserViewSetting(App *app) {
   } else {
     app->SetBrowserPageStart(0);
   }
-  app->prefs->Write();
+  app->prefs->RequestWrite();
   app->ResetBrowserMarquee();
   app->MarkBrowserDirty();
   app->LoadVisibleBrowserCoverCaches();
@@ -169,7 +169,7 @@ static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
   if (!prefs)
     return;
   prefs->fixed_layout_rtl = settings::ToggleSetting(prefs->fixed_layout_rtl);
-  prefs->Write();
+  prefs->RequestWrite();
 }
 
 static void ToggleCirclePadPageTurnSetting(Prefs *prefs) {
@@ -177,7 +177,7 @@ static void ToggleCirclePadPageTurnSetting(Prefs *prefs) {
     return;
   prefs->circle_pad_page_turn =
       settings::ToggleSetting(prefs->circle_pad_page_turn);
-  prefs->Write();
+  prefs->RequestWrite();
 }
 
 static void CycleLibrarySortSetting(App *app) {
@@ -186,7 +186,7 @@ static void CycleLibrarySortSetting(App *app) {
   const int next = settings::NextCyclicSetting(
       static_cast<int>(app->prefs->library_sort_mode), LIBRARY_SORT_COUNT);
   app->prefs->library_sort_mode = static_cast<LibrarySortMode>(next);
-  app->prefs->Write();
+  app->prefs->RequestWrite();
   app->ReSortLibraryBooks();
   app->ResetBrowserMarquee();
   app->MarkBrowserDirty();
@@ -216,7 +216,7 @@ static void TogglePublisherTextIndentSetting(App *app, Book *book, bool is_book_
     app->MarkBookLayoutDirty();
   }
   if (app->prefs)
-    app->prefs->Write();
+    app->prefs->RequestWrite();
 }
 
 static void TogglePublisherBlockMarginsSetting(App *app, Book *book, bool is_book_ctx) {
@@ -233,7 +233,25 @@ static void TogglePublisherBlockMarginsSetting(App *app, Book *book, bool is_boo
     app->MarkBookLayoutDirty();
   }
   if (app->prefs)
-    app->prefs->Write();
+    app->prefs->RequestWrite();
+}
+
+static void TogglePublisherHorizontalMarginsSetting(App *app, Book *book,
+                                                    bool is_book_ctx) {
+  if (!app)
+    return;
+  if (is_book_ctx && book && book->UsesTextLayoutSettings()) {
+    book->SetStylePublisherHorizontalMarginsOverride(
+        settings::NextTriStateOverride(
+            book->GetStylePublisherHorizontalMarginsOverride()));
+    app->MarkBookLayoutDirty();
+  } else {
+    app->publisher_horizontal_margins =
+        settings::ToggleSetting(app->publisher_horizontal_margins);
+    app->MarkBookLayoutDirty();
+  }
+  if (app->prefs)
+    app->prefs->RequestWrite();
 }
 
 SettingsController::SettingsController(App &app)
@@ -303,7 +321,7 @@ void SettingsController::ToggleCurrentBookMobiLineWrapFix() {
   if (book->GetPageCount() > 0)
     app_.SetPrefsLayoutNoticePending(true);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
-  app_.prefs->Write();
+  app_.prefs->RequestWrite();
   app_.MarkPrefsDirty();
 }
 
@@ -321,8 +339,8 @@ void SettingsController::PrefsInit() {
       "time remaining", "reopen last book", "color mode", "library view",
       "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
-      "clear cache",        "publisher indent", "publisher margins",
-      "Readwise", "sync with another 3DS"};
+      "clear cache",        "publisher indent", "publisher spacing",
+      "Readwise", "sync with another 3DS", "publisher sides"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -380,10 +398,13 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
+  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS);
 
   for (int slot = 0; slot < visibleCount; slot++) {
     const int button_id = EffectiveButtonForSlot(slot);
-    app_.prefsButtons[button_id].Move(5, slot * 38);
+    const int row_pitch = settings::PrefsRowPitch(visibleCount);
+    app_.prefsButtons[button_id].Resize(230, row_pitch - 2);
+    app_.prefsButtons[button_id].Move(5, slot * row_pitch);
     app_.prefsButtons[button_id].Draw(ts->screenright,
                                       slot == app_.GetPrefsSelectedIndex());
   }
@@ -475,6 +496,10 @@ void SettingsController::PrefsDraw() {
 void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   const u32 keys = input.keys_down;
   const u32 held = input.keys_held;
+  const u32 left_keys = app_.key.left | app_.key.dleft;
+  const u32 right_keys = app_.key.right | app_.key.dright;
+  const u32 up_keys = app_.key.up | app_.key.dup;
+  const u32 down_keys = app_.key.down | app_.key.ddown;
 #ifdef DSLIBRIS_DEBUG
   static int s_prefs_keys_budget = 48;
   if (s_prefs_keys_budget > 0 && keys) {
@@ -503,13 +528,13 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
         PrefsDraw();
       return;
     }
-    if (keys & app_.key.left) {
+    if (keys & left_keys) {
       go_to_page_dialog_.AdjustTarget(-1);
-    } else if (keys & app_.key.right) {
+    } else if (keys & right_keys) {
       go_to_page_dialog_.AdjustTarget(1);
-    } else if (keys & (app_.key.up | app_.key.l)) {
+    } else if (keys & (up_keys | app_.key.l)) {
       go_to_page_dialog_.AdjustTarget(-(int)kGoToPageCoarseStep);
-    } else if (keys & (app_.key.down | app_.key.r)) {
+    } else if (keys & (down_keys | app_.key.r)) {
       go_to_page_dialog_.AdjustTarget((int)kGoToPageCoarseStep);
     }
     if ((keys & KEY_TOUCH) || (held & KEY_TOUCH))
@@ -529,7 +554,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   } else if (prefs_input_utils::ShouldReturnFromPrefs(
                  keys, book_ctx, KEY_B, KEY_SELECT, KEY_Y, KEY_START)) {
     app_.ReturnFromPrefs();
-  } else if (keys & (app_.key.left | app_.key.l)) {
+  } else if (keys & (left_keys | app_.key.l)) {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
@@ -538,7 +563,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
     } else if (prefs_general_page_ == 1 && has_submenu) {
       GoToPrefsPage(0);
     }
-  } else if (keys & (app_.key.right | app_.key.r)) {
+  } else if (keys & (right_keys | app_.key.r)) {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();
@@ -548,22 +573,22 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
       GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreasePixelSize();
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreasePixelSize();
   } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreaseLineSpacing();
   } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreaseLineSpacing();
   } else if (selected_button == PREFS_BUTTON_PARASPACING &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreaseParaspacing();
   } else if (selected_button == PREFS_BUTTON_PARASPACING &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreaseParaspacing();
   } else if (keys & KEY_TOUCH) {
     PrefsHandleTouch(input);
@@ -686,14 +711,14 @@ void SettingsController::PrefsIncreasePixelSize() {
       app_.ts->SetPixelSize((u8)(value + 1));
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.reader_font_size < kTextPixelSizeMax) {
     app_.reader_font_size++;
     app_.ts->SetPixelSize((u8)app_.reader_font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -711,14 +736,14 @@ void SettingsController::PrefsDecreasePixelSize() {
       app_.ts->SetPixelSize((u8)(value - 1));
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.reader_font_size > kTextPixelSizeMin) {
     app_.reader_font_size--;
     app_.ts->SetPixelSize((u8)app_.reader_font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -736,14 +761,14 @@ void SettingsController::PrefsIncreaseLineSpacing() {
       app_.ts->linespacing = value + 1;
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.reader_line_spacing < kLineSpacingMaxPx) {
     app_.reader_line_spacing++;
     app_.ts->linespacing = app_.reader_line_spacing;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -761,14 +786,14 @@ void SettingsController::PrefsDecreaseLineSpacing() {
       app_.ts->linespacing = value - 1;
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.reader_line_spacing > 0) {
     app_.reader_line_spacing--;
     app_.ts->linespacing = app_.reader_line_spacing;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -785,13 +810,13 @@ void SettingsController::PrefsIncreaseParaspacing() {
       book->SetStyleParagraphSpacingOverride(value + 1);
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.paraspacing < 4) {
     app_.paraspacing++;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -808,13 +833,13 @@ void SettingsController::PrefsDecreaseParaspacing() {
       book->SetStyleParagraphSpacingOverride(value - 1);
       app_.MarkBookLayoutDirty();
       PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-      app_.prefs->Write();
+      app_.prefs->RequestWrite();
     }
   } else if (app_.paraspacing > 0) {
     app_.paraspacing--;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
   }
 }
 
@@ -825,7 +850,7 @@ void SettingsController::PrefsFlipOrientation() {
   app_.SetOrientation(next_orientation);
   app_.MarkBookLayoutDirty();
   PrefsRefreshButton(PREFS_BUTTON_ORIENTATION);
-  app_.prefs->Write();
+  app_.prefs->RequestWrite();
   if (app_.GetMode() == AppMode::Prefs)
     PrefsDraw();
 }
@@ -836,7 +861,7 @@ void SettingsController::PrefsToggleHandedness() {
                       : orientation_utils::ORIENT_TURNED_RIGHT;
   app_.SetHandedness(next);
   PrefsRefreshButton(PREFS_BUTTON_HANDEDNESS);
-  app_.prefs->Write();
+  app_.prefs->RequestWrite();
   if (app_.GetMode() == AppMode::Prefs)
     PrefsDraw();
 }
@@ -1047,7 +1072,7 @@ void SettingsController::PrefsRefreshButton(int index) {
     break;
   case PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS:
     app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel1(
-        std::string("publisher margins"));
+        std::string("publisher spacing"));
     app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel2(
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
@@ -1055,6 +1080,17 @@ void SettingsController::PrefsRefreshButton(int index) {
             app_.publisher_block_margins,
             book ? book->GetPublisherBlockMarginsEnabled()
                  : app_.publisher_block_margins));
+    break;
+  case PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS:
+    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS].SetLabel1(
+        std::string("publisher sides"));
+    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS].SetLabel2(
+        settings::PublisherSettingValueLabel(
+            is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
+            book ? book->GetStylePublisherHorizontalMarginsOverride() : -1,
+            app_.publisher_horizontal_margins,
+            book ? book->GetPublisherHorizontalMarginsEnabled()
+                 : app_.publisher_horizontal_margins));
     break;
   }
   app_.MarkPrefsDirty();
@@ -1121,6 +1157,7 @@ void SettingsController::ResetToDefaults() {
   app_.paraindent = 0;
   app_.publisher_text_indent = true;
   app_.publisher_block_margins = true;
+  app_.publisher_horizontal_margins = true;
   if (app_.orientation != orientation_utils::ORIENT_TURNED_LEFT)
     app_.SetOrientation(orientation_utils::ORIENT_TURNED_LEFT);
   app_.ts->SetColorMode(0);
@@ -1133,7 +1170,7 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->show_time_remaining = false;
   app_.reopen = true;
   app_.MarkBookLayoutDirty();
-  app_.prefs->Write();
+  app_.prefs->RequestWrite();
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
     PrefsRefreshButton(i);
   app_.MarkPrefsDirty();
@@ -1186,7 +1223,7 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_COLORMODE) {
     CycleColorMode(app_.ts.get(), &app_);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
     app_.MarkPrefsDirty();
     return;
   }
@@ -1195,7 +1232,7 @@ void SettingsController::PrefsHandlePress() {
     app_.prefs->show_time_remaining =
         settings::ToggleSetting(app_.prefs->show_time_remaining);
     PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
-    app_.prefs->Write();
+    app_.prefs->RequestWrite();
     app_.RequestStatusRedraw();
     app_.MarkPrefsDirty();
     return;
@@ -1262,6 +1299,13 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS) {
     TogglePublisherBlockMarginsSetting(&app_, book, is_book_ctx);
     PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS) {
+    TogglePublisherHorizontalMarginsSetting(&app_, book, is_book_ctx);
+    PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS);
     app_.MarkPrefsDirty();
     return;
   }

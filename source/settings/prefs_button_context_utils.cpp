@@ -2,6 +2,11 @@
 
 namespace settings {
 
+int PrefsRowPitch(unsigned char visible_count) {
+  // Eight per-book style rows must clear the footer, including touch slack.
+  return visible_count > 7 ? 35 : 38;
+}
+
 namespace {
 
 static const int kGeneralPrefsButtons[] = {
@@ -31,6 +36,7 @@ static const int kGeneralStyleButtons[] = {
     PREFS_BUTTON_PARASPACING,
     PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
     PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
+    PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS,
 };
 
 static const int kBookPrefsButtons[] = {
@@ -60,6 +66,7 @@ static const int kReflowBookPrefsPage2Buttons[] = {
     PREFS_BUTTON_PARASPACING,
     PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
     PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
+    PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS,
 };
 
 static const int kFixedLayoutBookPrefsPage2Buttons[] = {

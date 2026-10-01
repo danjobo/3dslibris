@@ -550,6 +550,10 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
                 sm.bottom_margin, lineheight);
       }
     }
+    emit_metrics.display_width =
+        emit_metrics.screen_width_by_screen[(p->screen >= 0 && p->screen < 2)
+                                                ? p->screen
+                                                : 0];
   }
   emit_metrics.base_margin_left = ts->margin.left;
   emit_metrics.margin_left = ts->margin.left + p->block_margin_left;

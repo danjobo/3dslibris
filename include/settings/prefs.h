@@ -30,6 +30,8 @@ public:
   void Apply();
   int Read();
   int Write();
+  void RequestWrite();
+  bool FlushPendingWrite(bool force = false);
   void ClearPendingCurrentBookRestore();
   void SetPendingCurrentBookRestore(const char *folder, const char *filename,
                                     int position,
@@ -38,7 +40,8 @@ public:
                                     int style_line_spacing,
                                     int style_paragraph_spacing,
                                     int style_publisher_text_indent,
-                                    int style_publisher_block_margins);
+                                    int style_publisher_block_margins,
+                                    int style_publisher_horizontal_margins);
   void AddPendingCurrentBookBookmark(uint16_t page);
   void EndPendingCurrentBookRestoreEntry();
   bool ApplyPendingCurrentBookRestore();
@@ -50,6 +53,7 @@ public:
                               int style_paragraph_spacing,
                               int style_publisher_text_indent,
                               int style_publisher_block_margins,
+                              int style_publisher_horizontal_margins,
                               uint32_t last_opened);
   void BeginSavedBookBookmarks(const char *folder, const char *filename);
   void RememberSavedBookBookmark(uint16_t page);
@@ -79,6 +83,8 @@ public:
 
 private:
   App *app;
+  bool write_pending;
+  uint64_t write_due_ms;
   bool pending_current_book_restore;
   bool collecting_pending_current_book;
   std::string pending_current_folder;
@@ -90,6 +96,7 @@ private:
   int pending_current_style_paragraph_spacing;
   int pending_current_style_publisher_text_indent;
   int pending_current_style_publisher_block_margins;
+  int pending_current_style_publisher_horizontal_margins;
   std::vector<uint16_t> pending_current_bookmarks;
   std::unordered_map<std::string, uint32_t> last_opened_by_book_key;
   SavedBookStateMap saved_state_by_book_key;

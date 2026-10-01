@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "formats/mupdf/mupdf_document.h"
@@ -104,6 +105,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   if (!book || !path)
     return 255;
 
+  const uint64_t perf_open_start = fixed_perf::Now();
   // Yield to APT before starting MuPDF — handles HOME pressed just before open.
   if (open_cancel_poll::Poll(book, book->GetStatusReporter(), "pdf-pre"))
     return BOOK_ERR_CANCELLED;
@@ -127,6 +129,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   fz_set_aa_level(ctx, kMuPdfAaLevel);
   fz_install_load_system_font_funcs(ctx, NULL, MuPdfLoadCjkFont, NULL);
 
+  const uint64_t perf_file_start = fixed_perf::Now();
   // Step 1: open the document.
   fz_var(doc);
   errno = 0;
@@ -154,6 +157,8 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
       rc = BOOK_ERR_CORRUPT;
   }
 
+  fixed_perf::Document(doc, "PDF", path);
+  fixed_perf::Record(doc, -1, -1, "pdf.open_file", fixed_perf::Now()-perf_file_start, rc==0 ? 1 : 0);
   if (rc != 0) {
     fz_drop_document(ctx, doc);
     fz_drop_context(ctx);
@@ -167,6 +172,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
     return BOOK_ERR_CANCELLED;
   }
 
+  const uint64_t perf_index_start = fixed_perf::Now();
   // Step 2: count pages.
   fz_try(ctx) {
     page_count = fz_count_pages(ctx, doc);
@@ -214,6 +220,8 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   }
   book->InitMuPdfView((u16)std::min(page_count, 65535), ctx, doc, outline,
                     is_new_3ds, document_kind);
+  fixed_perf::Record(doc, -1, -1, "pdf.index_metadata", fixed_perf::Now()-perf_index_start, 1);
+  fixed_perf::Record(doc, -1, -1, "pdf.open_total", fixed_perf::Now()-perf_open_start, 1);
   return 0;
 }
 

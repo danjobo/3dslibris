@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 #include "3ds/types.h"
 #include "shared/text_token_constants.h"
 
@@ -16,6 +17,7 @@ class IStatusReporter;
 class Text {
 public:
   int pixelsize;
+  int color_mode = 0;
   struct { u8 r, g, b; } bgcolor;
   u16 fgcolor;
   bool usefgcolor;
@@ -26,6 +28,16 @@ public:
   int linespacing;
   bool linebegan, bold, italic;
   bool screenleft_dirty, screenright_dirty;
+
+  // Opt-in recording for tests that exercise the real Page::Draw loop.
+  bool capture_rendered_text = false;
+  bool landscape = false;
+  int pen_x = 0, pen_y = 0;
+  std::string rendered_ascii;
+  std::vector<std::string> printed_strings;
+  int clipped_glyphs = 0;
+  struct RenderedGlyph { u32 codepoint; int x, y; u16 *screen; };
+  std::vector<RenderedGlyph> rendered_glyphs;
 
   Text()
       : pixelsize(14), fgcolor(0), usefgcolor(false), usebgcolor(false),
@@ -51,7 +63,8 @@ public:
   int GetStyle() const { return 0; }
   std::string GetFontFile(u8) const { return ""; }
   std::string GetFontFile(u8, int) const { return ""; }
-  int GetColorMode() { return 0; }
+  int GetColorMode() { return color_mode; }
+  void SetColorMode(int value) { color_mode = value; }
   u16 GetFgColor() { return fgcolor; }
   void SetTextColorOverride(u16) {}
   void ClearTextColorOverride() {}
@@ -61,28 +74,28 @@ public:
   IStatusReporter *GetReporter() const { return nullptr; }
   void SetFontDir(const std::string &) {}
 
-  // Pen / position. With track_pen set, the pen follows TextRenderer's rules
-  // (InitPen, PrintNewLine, glyph advance and bottom clipping) so Page::Draw
-  // can be checked on the host; clipped_glyphs counts glyphs the real
-  // renderer would silently skip below the bottom margin.
+  // Pen / position. Two opt-in modes follow TextRenderer's pen rules so
+  // Page::Draw can be checked on the host:
+  // - track_pen (fork): InitPen, PrintNewLine, glyph advance and bottom
+  //   clipping on each screen's real height; clipped_glyphs counts glyphs
+  //   the renderer would silently skip, line_trace records line advances
+  //   ("<screen>:<baseline>") to compare against the paginator.
+  // - capture_rendered_text (upstream): also records the drawn glyphs and
+  //   text (rendered_glyphs, rendered_ascii, printed_strings).
   bool track_pen = false;
-  int pen_x = 0;
-  int pen_y = 0;
-  int clipped_glyphs = 0;
-  // Optional: records each line advance ("<screen>:<baseline>") for tests
-  // that compare renderer line positions against the paginator.
   std::string *line_trace = nullptr;
 
+  bool TracksPen() const { return track_pen || capture_rendered_text; }
   void InitPen() {
-    if (!track_pen)
+    if (!TracksPen())
       return;
     pen_x = margin.left;
     pen_y = margin.top + GetHeight();
   }
-  u16 GetPenX() { return track_pen ? (u16)pen_x : 0; }
-  u16 GetPenY() { return track_pen ? (u16)pen_y : 0; }
+  u16 GetPenX() { return (u16)pen_x; }
+  u16 GetPenY() { return (u16)pen_y; }
   void SetPen(u16 x, u16 y) {
-    if (!track_pen)
+    if (!TracksPen())
       return;
     pen_x = x;
     pen_y = y;
@@ -94,12 +107,19 @@ public:
   // Geometry. The stub keeps display.* configurable per test, so the buffer
   // stride and logical width mirror it instead of the real fixed constants.
   int BufferStride() const { return display.height; }
-  int LogicalWidthFor(bool) const { return display.width; }
+  int LogicalWidthFor(bool is_left_buffer) const {
+    return capture_rendered_text && landscape
+        ? (is_left_buffer ? 400 : 320) : display.width;
+  }
   int LogicalHeightFor(bool is_left_buffer) const {
+    if (capture_rendered_text && landscape) return 240;
     return is_left_buffer ? 400 : 320;
   }
-  int LogicalWidth() const { return display.width; }
-  int LogicalHeight() const { return display.height; }
+  int LogicalWidth() const { return LogicalWidthFor(screen == screenleft); }
+  int LogicalHeight() const {
+    return capture_rendered_text ? LogicalHeightFor(screen == screenleft)
+                                 : display.height;
+  }
 
   // Screen management
   u16 *GetScreen() { return screen; }
@@ -110,21 +130,22 @@ public:
 
   // Drawing
   void FillRect(u16, u16, u16, u16, u16) {}
+  void DrawRect(u16, u16, u16, u16, u16) {}
   bool PrintNewLine() {
-    if (!track_pen)
+    if (!TracksPen())
       return false;
     pen_x = margin.left;
     const int height = GetHeight();
+    const int screen_h = track_pen ? CurrentScreenHeight() : LogicalHeight();
     const int y = pen_y + height + linespacing;
-    if (y > CurrentScreenHeight() - margin.bottom) {
-      if (screen == screenleft) {
-        screen = screenright;
-        pen_y = margin.top + height;
-        return true;
-      }
-      return false;
+    if (y > screen_h - margin.bottom) {
+      if (screen != screenleft)
+        return false;
+      screen = screenright;
+      pen_y = margin.top + height;
+      return true;
     }
-    pen_y += height + linespacing;
+    pen_y = y;
     if (line_trace)
       *line_trace += std::string(screen == screenleft ? "L" : "R") + ":" +
                      std::to_string(pen_y) + " ";
@@ -133,14 +154,27 @@ public:
   void ClearScreen() {}
   void PrintChar(u32 c) { PrintChar(c, 0); }
   void PrintChar(u32 c, u8 style) {
-    if (!track_pen)
+    if (track_pen) {
+      if (c != ' ' && pen_y > CurrentScreenHeight() - margin.bottom)
+        clipped_glyphs++;
+      pen_x += GetAdvance(c, style);
       return;
-    if (c != ' ' && pen_y > CurrentScreenHeight() - margin.bottom)
-      clipped_glyphs++;
-    pen_x += GetAdvance(c, style);
+    }
+    if (!capture_rendered_text)
+      return;
+    if (c >= 32)
+      rendered_glyphs.push_back({c, pen_x, pen_y, screen});
+    if (c > 32 && c < 127) {
+      if (pen_y <= LogicalHeight() - margin.bottom &&
+          pen_x + GetAdvance(c) <= LogicalWidth() - margin.right)
+        rendered_ascii += (char)c;
+      else
+        clipped_glyphs++;
+    }
+    pen_x += GetAdvance(c);
   }
-  void PrintString(const char *) {}
-  void PrintString(const char *, u8) {}
+  void PrintString(const char *value) { if (value) printed_strings.push_back(value); }
+  void PrintString(const char *value, u8) { PrintString(value); }
 
   // Wrap / clip flags
   bool IsAutoWrapEnabled() const { return false; }

@@ -74,10 +74,15 @@ void TestBannerAudioIsAudible() {
   test::ExpectTrue("fmt chunk", have_fmt);
   test::ExpectTrue("data chunk", have_data);
   test::ExpectEq("PCM format", (int)audio_format, 1);
-  test::ExpectEq("mono", (int)channels, 1);
+  // HOME banner CWAV requires stereo, even for a mono source tune.
+  test::ExpectEq("stereo", (int)channels, 2);
   test::ExpectEq("16 kHz", (int)sample_rate, 16000);
   test::ExpectEq("16 bit", (int)bits_per_sample, 16);
   test::ExpectTrue("has samples", data_size >= 16000);
+  const size_t frame_bytes = channels * (bits_per_sample / 8);
+  test::ExpectTrue("whole PCM frames", data_size % frame_bytes == 0);
+  test::ExpectTrue("at most three seconds",
+                   data_size / frame_bytes <= (size_t)sample_rate * 3);
 
   int max_abs_sample = 0;
   const size_t end = std::min(wav.size(), data_start + data_size);

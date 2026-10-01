@@ -433,6 +433,9 @@ void Page::Draw(Text *ts) {
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
   book_xml_css_style_utils::TextAlign paragraph_align = book_xml_css_style_utils::TextAlign::Left;
+  // linebegan also preserves blank-line spacing; alignment needs its own
+  // reset on ordinary newlines, without suppressing consecutive breaks.
+  bool line_alignment_pending = true;
   while (i < length) {
     u32 c = buf[i];
     if (c == TEXT_PARAGRAPH_RTL) {
@@ -515,6 +518,7 @@ void Page::Draw(Text *ts) {
       i += (i + 1 < length) ? 2 : 1;
       continue;
     } else if (c == '\n') {
+      line_alignment_pending = true;
       // line break, page breaking if necessary
       flush_render_line("newline-before");
       i++;
@@ -522,6 +526,12 @@ void Page::Draw(Text *ts) {
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       next_image_align = 0;
       next_image_author_width = 0;
+
+      // A newline after a rule (or an empty block) does not move the pen.
+      // Checking for overflow anyway can abandon the rest of this page's
+      // buffer, including a heading that still fits on the current line.
+      if (!ts->linebegan)
+        continue;
 
       const text_render_layout_utils::ReadingScreenMetrics metrics =
           current_reading_metrics();
@@ -569,6 +579,7 @@ void Page::Draw(Text *ts) {
         ts->PrintNewLine();
       }
     } else if (c == TEXT_SCREEN_BREAK) {
+      line_alignment_pending = true;
       flush_render_line("screen-break-before");
       i++;
       // Forced screen break emitted by ForcePageBreak (CSS page-break-before)
@@ -770,7 +781,7 @@ void Page::Draw(Text *ts) {
 #endif
 
         if (image_plan.mode == INLINE_IMAGE_LAYOUT_INLINE &&
-            !ts->linebegan &&
+            (!ts->linebegan || line_alignment_pending) &&
             (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
              paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
           ts->SetPen((u16)page_alignment_utils::ComputeAlignedLineStartX(
@@ -824,6 +835,7 @@ void Page::Draw(Text *ts) {
         bool stop_page_draw = false;
         switch (image_plan.mode) {
         case INLINE_IMAGE_LAYOUT_INLINE:
+          line_alignment_pending = false;
           ts->SetPen(ts->GetPenX() + image_plan.draw_width + ts->GetAdvance(' '),
                      ts->GetPenY());
           ts->linebegan = true;
@@ -915,7 +927,7 @@ void Page::Draw(Text *ts) {
             (int)ts->GetPenY(), on_first_screen ? "first" : "second");
 #endif
         ts->SetPen((u16)rtl_x, ts->GetPenY());
-      } else if (!ts->linebegan &&
+      } else if ((!ts->linebegan || line_alignment_pending) &&
                  (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
                   paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
         auto measure_fn = [](u32 codepoint, unsigned char style, void *ctx) -> int {
@@ -931,6 +943,7 @@ void Page::Draw(Text *ts) {
                    ts->GetPenY());
       }
 
+      line_alignment_pending = false;
       const int glyph_x0 = (int)ts->GetPenX();
       const int base_pen_y = (int)ts->GetPenY();
       append_render_char(c);

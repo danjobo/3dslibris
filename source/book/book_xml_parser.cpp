@@ -556,7 +556,8 @@ void end(void *data, const char *el) {
     // past the scope boundary.  The next block element after this restore
     // should not inherit the suppress signal and add an unintended blank line.
 #if defined(DSLIBRIS_DEBUG)
-    DBG_LOGF(p->book->GetStatusReporter(),
+    DBG_LOGF_CAT(p->book->GetStatusReporter(), DBG_LEVEL_TRACE,
+      DBG_CAT_LAYOUT,
       "FontScope EXIT[%s] restore_px=%d old_lh=%d new_lh=%d suppress_only=%d->0 pbl=%d pbb=%d",
       el, (int)restore_font_size_px, old_lh, new_lh,
       p->pending_block_spacing_suppress_only ? 1 : 0,

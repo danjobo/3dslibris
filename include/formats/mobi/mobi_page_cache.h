@@ -25,4 +25,9 @@ void Save(Book *book, const char *book_path,
 
 void SavePending(Book *book);
 
+#ifdef DSLIBRIS_HOST_TEST
+void SetCacheDirForTest(const char *dir);
+void SetMaxBulkCacheLoadBytesForTest(long bytes);
+#endif
+
 } // namespace mobi_page_cache

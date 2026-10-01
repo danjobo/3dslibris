@@ -2,6 +2,7 @@
 
 #include "book/book.h"
 #include "book/page.h"
+#include "book/page_buffer_utils.h"
 #include "shared/debug_log.h"
 #include "formats/common/page_cache_field_limits.h"
 #include "formats/common/page_cache_utils.h"
@@ -17,8 +18,16 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 22;
+static const u16 kMobiPageCacheVersion = 23;
 static const size_t kPageCacheIoBufferBytes = 262144;
+// Bulk reads avoid per-record SD overhead for small books. Stream larger
+// caches so the full serialized file does not coexist with decoded pages.
+static const long kMaxBulkCacheLoadBytes = 16L * 1024L * 1024L;
+
+#ifdef DSLIBRIS_HOST_TEST
+static std::string g_host_test_cache_dir;
+static long g_host_test_max_bulk_cache_load_bytes = -1;
+#endif
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -35,12 +44,35 @@ struct MobiPageCacheHeader {
   u16 toc_unresolved;
 };
 
+static const std::string &GetEffectiveCacheDir() {
+#ifdef DSLIBRIS_HOST_TEST
+  if (!g_host_test_cache_dir.empty())
+    return g_host_test_cache_dir;
+#endif
+  return paths::GetMobiCacheDir();
+}
+
+static long MaxBulkCacheLoadBytes() {
+#ifdef DSLIBRIS_HOST_TEST
+  if (g_host_test_max_bulk_cache_load_bytes >= 0)
+    return g_host_test_max_bulk_cache_load_bytes;
+#endif
+  return kMaxBulkCacheLoadBytes;
+}
+
+static bool IsValidHeader(const MobiPageCacheHeader &hdr) {
+  return hdr.magic == kMobiPageCacheMagic &&
+         hdr.version == kMobiPageCacheVersion && hdr.page_count > 0 &&
+         hdr.page_count <= 10000 && hdr.chapter_count <= 4000 &&
+         hdr.image_count <= 65535 && hdr.title_len <= 1000;
+}
+
 static void EnsureCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
   mkdir(paths::GetCacheBaseDir().c_str(), 0777);
-  mkdir(paths::GetMobiCacheDir().c_str(), 0777);
+  mkdir(GetEffectiveCacheDir().c_str(), 0777);
   initialized = true;
 }
 
@@ -73,7 +105,7 @@ static std::string BuildCachePath(const char *book_path,
   params.variant_token = line_wrap_fix_enabled ? "1" : "0";
 
   return page_cache_utils::BuildPageCachePath(
-      paths::GetMobiCacheDir().c_str(), ".mpc", book_path, params);
+      GetEffectiveCacheDir(), ".mpc", book_path, params);
 }
 
 static bool WritePagesFromBook(FILE *fp, Book *book,
@@ -129,6 +161,34 @@ static bool ReadPagesIntoBook(page_cache_utils::BufReader *r, uint32_t count,
   return true;
 }
 
+static bool ReadPagesIntoBook(FILE *fp, uint32_t count,
+                              uint16_t max_page_codepoints, Book *book) {
+  if (!fp || !book)
+    return false;
+
+  book->ReservePageCapacity(count);
+
+  for (uint32_t i = 0; i < count; i++) {
+    uint16_t length = 0;
+    if (fread(&length, 1, sizeof(length), fp) != sizeof(length) ||
+        length > max_page_codepoints) {
+      return false;
+    }
+
+    page_buffer_utils::OwnedPageBuffer owned;
+    if (length > 0) {
+      owned.codepoints.resize(length);
+      const size_t byte_count = (size_t)length * sizeof(uint32_t);
+      if (fread(owned.codepoints.data(), 1, byte_count, fp) != byte_count)
+        return false;
+    }
+
+    Page *page = book->AppendPage();
+    page->AdoptBuffer(&owned);
+  }
+  return true;
+}
+
 static std::vector<page_cache_utils::CachedChapter>
 CollectCachedChapters(const std::vector<ChapterEntry> &chapters) {
   std::vector<page_cache_utils::CachedChapter> cached;
@@ -174,11 +234,10 @@ bool TryLoad(Book *book, const char *book_path,
   if (cache_path.empty())
     return false;
 
-  // Bulk-read the cache file; same rationale as epub_page_cache::TryLoad —
-  // per-record fread() over an SD card is the dominant cost on big books.
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp)
     return false;
+  setvbuf(fp, NULL, _IOFBF, kPageCacheIoBufferBytes);
   if (fseek(fp, 0, SEEK_END) != 0) {
     fclose(fp);
     return false;
@@ -190,67 +249,126 @@ bool TryLoad(Book *book, const char *book_path,
     return false;
   }
   rewind(fp);
-  std::vector<uint8_t> file_buf((size_t)file_size_long);
-  if (fread(file_buf.data(), 1, file_buf.size(), fp) != file_buf.size()) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-  fclose(fp);
-
-  page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
 
   MobiPageCacheHeader hdr;
-  if (!reader.ReadRaw(&hdr, sizeof(hdr))) {
-    remove(cache_path.c_str());
-    return false;
-  }
-  if (hdr.magic != kMobiPageCacheMagic ||
-      hdr.version != kMobiPageCacheVersion || hdr.page_count == 0 ||
-      hdr.page_count > 10000 || hdr.chapter_count > 4000 ||
-      hdr.image_count > 65535 ||
-      hdr.title_len > 1000) {
+  if (fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr) ||
+      !IsValidHeader(hdr)) {
+    fclose(fp);
     remove(cache_path.c_str());
     return false;
   }
 
   std::string title;
-  if (!page_cache_utils::ReadRawString(&reader, hdr.title_len, &title)) {
+  if (!page_cache_utils::ReadRawString(fp, hdr.title_len, &title)) {
+    fclose(fp);
     remove(cache_path.c_str());
     return false;
   }
 
+  const bool use_stream_load = file_size_long > MaxBulkCacheLoadBytes();
   bool ok = true;
-  ok = ReadPagesIntoBook(&reader, hdr.page_count,
-                         page_cache_limits::kPageMaxBytes, book);
 
-  if (ok) {
-    std::vector<page_cache_utils::CachedChapter> chapters;
-    ok = page_cache_utils::ReadChapters(&reader, hdr.chapter_count,
-                                        page_cache_limits::kChapterTitleMaxBytes,
-                                        &chapters);
-    if (ok)
-      AppendCachedChapters(book, chapters);
-  }
+  if (use_stream_load) {
+#ifdef DSLIBRIS_DEBUG
+    if (book->GetStatusReporter()) {
+      DBG_LOGF(book->GetStatusReporter(),
+               "MOBI cache load: stream large cache size=%ld path=%s",
+               file_size_long, cache_path.c_str());
+    }
+#endif
+    ok = ReadPagesIntoBook(fp, hdr.page_count,
+                           page_cache_limits::kPageMaxBytes, book);
 
-  if (ok) {
-    for (u32 i = 0; i < hdr.image_count; i++) {
-      std::string imgpath;
-      if (!page_cache_utils::ReadLengthPrefixedString16(
-              &reader, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
-        ok = false;
-        break;
+    if (ok) {
+      std::vector<page_cache_utils::CachedChapter> chapters;
+      ok = page_cache_utils::ReadChapters(
+          fp, hdr.chapter_count, page_cache_limits::kChapterTitleMaxBytes,
+          &chapters);
+      if (ok)
+        AppendCachedChapters(book, chapters);
+    }
+
+    if (ok) {
+      for (u32 i = 0; i < hdr.image_count; i++) {
+        std::string imgpath;
+        if (!page_cache_utils::ReadLengthPrefixedString16(
+                fp, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
+          ok = false;
+          break;
+        }
+        u8 follow_lines = 0;
+        if (fread(&follow_lines, 1, sizeof(follow_lines), fp) !=
+            sizeof(follow_lines)) {
+          ok = false;
+          break;
+        }
+        u16 image_id = book->RegisterInlineImage(imgpath);
+        book->SetInlineImageFollowTextLines(image_id, follow_lines);
       }
-      u8 follow_lines = 0;
-      if (!reader.ReadRaw(&follow_lines, sizeof(follow_lines))) {
-        ok = false;
-        break;
+    }
+
+    fclose(fp);
+    fp = NULL;
+  } else {
+    std::vector<uint8_t> file_buf((size_t)file_size_long);
+    memcpy(file_buf.data(), &hdr, sizeof(hdr));
+    if (hdr.title_len > 0)
+      memcpy(file_buf.data() + sizeof(hdr), title.data(), hdr.title_len);
+    const size_t remaining =
+        file_buf.size() - (sizeof(hdr) + (size_t)hdr.title_len);
+    if (remaining > 0 &&
+        fread(file_buf.data() + sizeof(hdr) + hdr.title_len, 1, remaining,
+              fp) != remaining) {
+      fclose(fp);
+      remove(cache_path.c_str());
+      return false;
+    }
+    fclose(fp);
+    fp = NULL;
+
+    page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
+    MobiPageCacheHeader skip_hdr;
+    std::string skip_title;
+    if (!reader.ReadRaw(&skip_hdr, sizeof(skip_hdr)) ||
+        !page_cache_utils::ReadRawString(&reader, skip_hdr.title_len,
+                                         &skip_title)) {
+      remove(cache_path.c_str());
+      return false;
+    }
+
+    ok = ReadPagesIntoBook(&reader, hdr.page_count,
+                           page_cache_limits::kPageMaxBytes, book);
+
+    if (ok) {
+      std::vector<page_cache_utils::CachedChapter> chapters;
+      ok = page_cache_utils::ReadChapters(
+          &reader, hdr.chapter_count, page_cache_limits::kChapterTitleMaxBytes,
+          &chapters);
+      if (ok)
+        AppendCachedChapters(book, chapters);
+    }
+
+    if (ok) {
+      for (u32 i = 0; i < hdr.image_count; i++) {
+        std::string imgpath;
+        if (!page_cache_utils::ReadLengthPrefixedString16(
+                &reader, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
+          ok = false;
+          break;
+        }
+        u8 follow_lines = 0;
+        if (!reader.ReadRaw(&follow_lines, sizeof(follow_lines))) {
+          ok = false;
+          break;
+        }
+        u16 image_id = book->RegisterInlineImage(imgpath);
+        book->SetInlineImageFollowTextLines(image_id, follow_lines);
       }
-      u16 image_id = book->RegisterInlineImage(imgpath);
-      book->SetInlineImageFollowTextLines(image_id, follow_lines);
     }
   }
   if (!ok) {
+    if (fp)
+      fclose(fp);
     book->Close();
     remove(cache_path.c_str());
     return false;
@@ -381,5 +499,15 @@ void SavePending(Book *book) {
 
   book->SetPendingMobiPageCacheSave(false);
 }
+
+#ifdef DSLIBRIS_HOST_TEST
+void SetCacheDirForTest(const char *dir) {
+  g_host_test_cache_dir = dir ? dir : "";
+}
+
+void SetMaxBulkCacheLoadBytesForTest(long bytes) {
+  g_host_test_max_bulk_cache_load_bytes = bytes;
+}
+#endif
 
 } // namespace mobi_page_cache

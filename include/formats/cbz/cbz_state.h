@@ -4,6 +4,7 @@
 #include "formats/common/fixed_layout_bitmap_cache.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/cbz/cbz_types.h"
+#include "formats/cbz/cbz_archive.h"
 
 #include <3ds.h>
 
@@ -61,6 +62,8 @@ struct Book::CbzState {
           thread_handle(NULL) {}
   };
 
+  // Main-thread reader; background/cover reads keep their own handles.
+  CbzArchiveReader archive_reader;
   std::string archive_path;
   int target_top_width;
   int target_top_height;

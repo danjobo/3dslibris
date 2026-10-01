@@ -178,6 +178,16 @@ inline const std::string &GetPrefsFile() {
   return path;
 }
 
+inline const std::string &GetPrefsTempFile() {
+  static const std::string path = GetPrefsFile() + ".tmp";
+  return path;
+}
+
+inline const std::string &GetPrefsBackupFile() {
+  static const std::string path = GetPrefsFile() + ".bak";
+  return path;
+}
+
 inline const std::string &GetIconPngDir() {
   static const std::string path = GetResourceDir() + "/ui/icons/png";
   return path;

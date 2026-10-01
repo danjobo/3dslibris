@@ -237,7 +237,8 @@ void HandleCssInlineStylingStart(
         // the current value (e.g. user is already at kTextPixelSizeMax).
         if (book_xml_parser_support::IsBlockLevelElement(el)) {
 #if defined(DSLIBRIS_DEBUG)
-          DBG_LOGF(p->book->GetStatusReporter(),
+          DBG_LOGF_CAT(p->book->GetStatusReporter(), DBG_LEVEL_TRACE,
+            DBG_CAT_LAYOUT,
             "FontScope ENTER[%s] clamp=%d->%d cur_px=%d suppress_only=%d->0 pbl=%d",
             el, (int)ts->GetPixelSize(), new_font_px ? (int)new_font_px : (int)ts->GetPixelSize(),
             (int)ts->GetPixelSize(),

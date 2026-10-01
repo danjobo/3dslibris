@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "formats/mupdf/mupdf_worker.h"
@@ -80,18 +81,15 @@ void ReleaseMuPdfMemoryForSuspendImpl(Book::MuPdfState *mupdf_state) {
 void CancelMuPdfIncrementalRenderState(Book::MuPdfState *mupdf_state) {
   if (!mupdf_state)
     return;
+  if (mupdf_state->worker &&
+      __atomic_load_n(&mupdf_state->worker->job_pending, __ATOMIC_ACQUIRE)) {
+    // A timeout does not stop a strip renderer. Join before releasing its
+    // pixels or display list; only the worker may acknowledge job completion.
+    // This path must not run inside the APT suspend hook.
+    ShutdownMuPdfWorker(mupdf_state);
+    mupdf_state->worker_init_attempted = false;
+  }
   if (mupdf_state->worker && mupdf_state->worker->job_submitted) {
-    if (__atomic_load_n(&mupdf_state->worker->job_pending, __ATOMIC_ACQUIRE)) {
-      // Wait briefly for the current strip render (typically < 50ms).
-      // Bounded to avoid blocking HOME button acknowledgment indefinitely.
-      const u64 deadline_ms = osGetTime() + 100;
-      while (__atomic_load_n(&mupdf_state->worker->job_pending, __ATOMIC_ACQUIRE) &&
-             osGetTime() < deadline_ms) {
-        svcSleepThread(2000000LL); // 2ms
-      }
-      // Force-clear pending in case of timeout so the next render can start.
-      __atomic_store_n(&mupdf_state->worker->job_pending, false, __ATOMIC_RELEASE);
-    }
     LightEvent_Clear(&mupdf_state->worker->done_event);
     mupdf_state->worker->job_submitted = false;
     mupdf_state->worker->job_strip_y0 = 0;
@@ -117,6 +115,7 @@ bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,
   if (!slot)
     return false;
 
+  CancelMuPdfIncrementalRenderState(mupdf_state);
   ResetBitmapCache(&mupdf_state->current_preview);
   ResetBitmapCache(&mupdf_state->current_interactive_tile);
   mupdf_state->current_preview = slot->preview;
@@ -133,7 +132,6 @@ bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,
   mupdf_state->final_cache_pending =
       app_flow_utils::MuPdfWantsFinalQualityRender(
           mupdf_state->document_kind);
-  CancelMuPdfIncrementalRenderState(mupdf_state);
   return true;
 }
 
@@ -154,6 +152,7 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
     return true;
   }
 
+  CancelMuPdfIncrementalRenderState(mupdf_state);
   if (mupdf_state->cached_display_list && mupdf_state->ctx) {
     fz_drop_display_list(mupdf_state->ctx, mupdf_state->cached_display_list);
     mupdf_state->cached_display_list = NULL;
@@ -166,7 +165,7 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
 bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_index) {
   if (!mupdf_state)
     return false;
-  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF preview: enter page=%d cached=%d current_page=%d",
                page_index,
                BitmapCacheValid(mupdf_state->current_preview, page_index) ? 1
@@ -181,7 +180,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   float page_height = mupdf_state->page_height;
   const float preview_scale = ComputeMuPdfPreviewScale(page_width, page_height, mupdf_state->target_bottom_width, mupdf_state->target_bottom_height);
   DBG_LOGF_CAT(
-      mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+      mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
       "MUPDF preview: render-begin page=%d scale=%.4f page_size=(%.2f,%.2f)",
       page_index, (double)preview_scale, (double)page_width,
       (double)page_height);
@@ -200,14 +199,25 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
     mupdf_state->page_too_complex_for_device = page_index;
     return false;
   }
+  // Keep one interpretation of the current page for preview, zoom and strips.
+  // The existing helper joins any active strip before dropping an old list.
+  fz_display_list *display_list = NULL;
+  if (!EnsureMuPdfDisplayListForPage(mupdf_state, page_index, &display_list))
+    return false;
+  fz_display_list *new_list = NULL;
   if (!RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
                          preview_scale, &rendered, &page_width, &page_height,
-                         NULL, NULL, NULL, mupdf_state->reporter)) {
+                         NULL, display_list, display_list ? NULL : &new_list,
+                         mupdf_state->reporter, "pdf.preview_total")) {
     DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
                  "MUPDF preview: render-failed page=%d", page_index);
     return false;
   }
-  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  if (new_list) {
+    mupdf_state->cached_display_list = new_list;
+    mupdf_state->cached_display_list_page = page_index;
+  }
+  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF preview: render-done page=%d bmp=%dx%d", page_index,
                rendered.width, rendered.height);
 
@@ -218,7 +228,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   mupdf_state->page_width = page_width;
   mupdf_state->page_height = page_height;
   DBG_LOGF_CAT(
-      mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+      mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
       "MUPDF preview: cache-store-done page=%d content=(%.3f,%.3f %.3f x %.3f)",
       page_index, (double)left, (double)top, (double)width, (double)height);
   return true;
@@ -363,6 +373,7 @@ static void MuPdfWorkerThreadFunc(void *arg) {
     if (!__atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
       continue;
 
+    fixed_perf::Timer perf_strip(mupdf_state->doc, w->job_page_index, -1, "pdf.strip_worker");
     w->job_result = RenderMuPdfBitmapStrip(
         w->worker_ctx,
         w->job_bounds_x0, w->job_bounds_y0, w->job_bounds_x1, w->job_bounds_y1,
@@ -370,6 +381,8 @@ static void MuPdfWorkerThreadFunc(void *arg) {
         w->job_strip_y0, w->job_strip_y1,
         w->job_full_width, w->job_full_height,
         w->job_pixel_buf);
+    perf_strip.End(w->job_result ? 1 : 0, w->job_pixel_buf->size()*sizeof(u16),
+                   w->job_full_width, w->job_strip_y1-w->job_strip_y0);
 
     __atomic_store_n(&w->job_pending, false, __ATOMIC_RELEASE);
     LightEvent_Signal(&w->done_event);
@@ -643,6 +656,7 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
                            ? inc.partial_height
                            : ((s + 1) * inc.partial_height) / inc.strips_total;
 
+  fixed_perf::Timer perf_strip(mupdf_state->doc, page_index, -1, "pdf.strip_sync");
   const bool ok = RenderMuPdfBitmapStrip(mupdf_state->ctx,
                                         inc.bounds_x0, inc.bounds_y0,
                                         inc.bounds_x1, inc.bounds_y1,
@@ -650,6 +664,7 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
                                         strip_y0, strip_y1,
                                         inc.partial_width, inc.partial_height,
                                         &inc.partial_pixels);
+  perf_strip.End(ok ? 1 : 0, inc.partial_pixels.size()*sizeof(u16), inc.partial_width, strip_y1-strip_y0);
   if (ok) {
     inc.strips_completed++;
   } else {

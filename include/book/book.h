@@ -226,6 +226,7 @@ public:
   int style_paragraph_spacing_override;
   int style_publisher_text_indent_override;
   int style_publisher_block_margins_override;
+  int style_publisher_horizontal_margins_override;
 
   Book(const BookContext &ctx);
   ~Book();
@@ -241,12 +242,15 @@ public:
   void SetStyleLineSpacingOverride(int value);
   bool GetPublisherTextIndentEnabled() const;
   bool GetPublisherBlockMarginsEnabled() const;
+  bool GetPublisherHorizontalMarginsEnabled() const;
   int GetStyleParagraphSpacingOverride() const;
   void SetStyleParagraphSpacingOverride(int value);
   int GetStylePublisherTextIndentOverride() const;
   void SetStylePublisherTextIndentOverride(int value);
   int GetStylePublisherBlockMarginsOverride() const;
   void SetStylePublisherBlockMarginsOverride(int value);
+  int GetStylePublisherHorizontalMarginsOverride() const;
+  void SetStylePublisherHorizontalMarginsOverride(int value);
   int GetOrientation();
   void DrawBottomGradientBackground();
   void DrawTopGradientBackground();

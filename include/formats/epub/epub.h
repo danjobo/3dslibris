@@ -55,7 +55,7 @@ typedef struct {
   std::string tocid;   //! id of the NCX item (EPUB2)
   std::string navid;   //! id of the nav document (EPUB3)
   std::string parsed_doc_title; //! per-XHTML parsed title/heading candidate
-  std::map<std::string, std::vector<std::string>> css_href_by_doc;
+  std::map<std::string, std::vector<std::string>> css_sources_by_doc;
   std::map<std::string, epub_css_class_map::CssClassMap> css_class_map_by_path;
   bool metadata_parse_complete;
 } epub_data_t;

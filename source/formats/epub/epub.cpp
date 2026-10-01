@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "formats/epub/epub.h"
+
 #include "formats/epub/epub_cache.h"
 #include "formats/epub/epub_manifest.h"
 #include "formats/epub/epub_toc.h"
@@ -92,6 +93,10 @@ Snapshot Get();
 #include <sys/stat.h>
 #include <unordered_map>
 #include <vector>
+
+#ifndef EPUB_METADATA_TRACE
+#define EPUB_METADATA_TRACE 0
+#endif
 
 typedef BookParseDeps EpubDeps;
 
@@ -468,7 +473,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   u64 t_after_rootfile = t_parse_begin;
   u64 t_after_content = t_parse_begin;
 #endif
-  if (reporter)
+  if (reporter && (!metadataonly || EPUB_METADATA_TRACE))
     DBG_LOG(reporter, "EPUB: parse begin");
 
   unzFile uf = NULL;
@@ -499,7 +504,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   if (metadataonly) {
     unzClose(uf);
     epub_data_delete(&parsedata);
-    if (reporter) {
+    if (reporter && EPUB_METADATA_TRACE) {
       DBG_LOGF(reporter,
                "EPUB: metadata timing container=%llums opf=%llums total=%llums",
                (unsigned long long)SafeElapsedMs(t_after_container,

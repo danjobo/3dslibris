@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 #include "formats/cbz/cbz_worker.h"
 
 #include "book/book.h"
@@ -24,11 +25,15 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
   if (!out || page_index < 0 || page_index >= (int)entries.size())
     return false;
 
+  fixed_perf::Timer perf_read(&entries, page_index, zoom_index, "cbz.prefetch_read_zip");
   std::vector<unsigned char> bytes;
   if (!ReadCbzArchiveEntryBytes(archive_path, entries[(size_t)page_index], &bytes,
                                 format_limits::kMaxCbzPageEntryBytes)) {
+    perf_read.End(0);
     return false;
   }
+  perf_read.End(1, bytes.size());
+  fixed_perf::Timer perf_decode(&entries, page_index, zoom_index, "cbz.prefetch_decode");
 
   CbzDecodedPage decoded;
   int decode_zoom_index = std::min(zoom_index, max_zoom_index);
@@ -40,6 +45,7 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
       break;
     }
   }
+  perf_decode.End(decoded_ok ? 1 : 0, bytes.size(), decoded.source_bitmap.width, decoded.source_bitmap.height);
   if (!decoded_ok)
     return false;
 
@@ -50,10 +56,12 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
               2 * fixed_layout_preview::kPadding,
           bottom_height -
               2 * fixed_layout_preview::kPadding);
+  fixed_perf::Timer perf_scale(&entries, page_index, zoom_index, "cbz.prefetch_scale");
   CbzBitmap preview_bitmap;
   if (!ScaleCbzBitmap(decoded.source_bitmap, std::max(1, preview_layout.width),
                       std::max(1, preview_layout.height), true,
                       &preview_bitmap)) {
+    perf_scale.End(0);
     return false;
   }
 
@@ -74,9 +82,11 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
   // avoids paying bilinear scaling cost during background preparation.
   if (!ScaleCbzBitmap(decoded.source_bitmap, interactive_width,
                       interactive_height, false, &interactive_bitmap)) {
+    perf_scale.End(0);
     return false;
   }
 
+  perf_scale.End(1, interactive_bitmap.pixels.size()*sizeof(u16), interactive_width, interactive_height);
   out->page = page_index;
   out->zoom_index = zoom_index;
   out->page_width = (float)decoded.original_width;

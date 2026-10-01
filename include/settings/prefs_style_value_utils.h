@@ -15,6 +15,10 @@ struct StyleValueContext {
         override_value(-1) {}
 };
 
+// Missing side-margin settings in old configs inherit the former combined value.
+int ReadPublisherHorizontalMargins(const char *const *attributes,
+                                   int legacy_margins);
+
 int EffectiveStyleValue(const StyleValueContext &context);
 std::string FontSizeValueLabel(const StyleValueContext &context);
 std::string LineSpacingValueLabel(const StyleValueContext &context);

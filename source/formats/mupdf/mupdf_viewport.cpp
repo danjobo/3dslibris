@@ -20,11 +20,8 @@ static void ResetMuPdfDeferredCachesForSynchronousRender(
   CancelMuPdfIncrementalRenderState(mupdf_state);
   ResetBitmapCache(&mupdf_state->current_interactive_tile);
   ResetBitmapCache(&mupdf_state->current_final_zoom);
-  if (mupdf_state->cached_display_list && mupdf_state->ctx) {
-    fz_drop_display_list(mupdf_state->ctx, mupdf_state->cached_display_list);
-    mupdf_state->cached_display_list = NULL;
-  }
-  mupdf_state->cached_display_list_page = -1;
+  // Zoom changes raster dimensions, not the page's drawing commands.
+  // Keep the list; EnsureMuPdfDisplayListForPage invalidates it on page change.
   if (mupdf_state->ctx) {
     ResetAdjacentSlot(&mupdf_state->prev_slot, mupdf_state->ctx);
     ResetAdjacentSlot(&mupdf_state->next_slot, mupdf_state->ctx);

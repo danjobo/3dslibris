@@ -15,6 +15,8 @@ struct PrefsPageContext {
         include_line_wrap_fix(false) {}
 };
 
+int PrefsRowPitch(unsigned char visible_count);
+
 unsigned char PrefsPageButtonCount(const PrefsPageContext &context);
 int PrefsPageButtonForSlot(const PrefsPageContext &context,
                            unsigned char slot);

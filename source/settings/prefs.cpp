@@ -13,10 +13,12 @@
 
 #include "settings/prefs.h"
 #include "book/highlight_color_utils.h"
+#include "settings/prefs_file_utils.h"
 
 #include "3ds.h"
 #include "app/app.h"
 #include "shared/debug_log.h"
+
 #include "book/book.h"
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
@@ -25,6 +27,7 @@
 #include "shared/orientation_utils.h"
 #include "shared/utf8_utils.h"
 #include "settings/font_config_utils.h"
+#include "settings/prefs_style_value_utils.h"
 #include "sys/stat.h"
 #include "sys/time.h"
 #include "ui/text_limits.h"
@@ -32,6 +35,10 @@
 #include <sys/param.h>
 #include <string>
 #include <vector>
+
+#ifndef RECENT_BOOKS_TRACE
+#define RECENT_BOOKS_TRACE 0
+#endif
 
 #define PARSEBUFSIZE 1024 * 64
 
@@ -123,6 +130,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       if (!strcmp(attr[i], "publisherBlockMargins"))
         app->publisher_block_margins = atoi(attr[i + 1]) != 0;
     }
+    app->publisher_horizontal_margins =
+        settings::ReadPublisherHorizontalMargins(
+            attr, app->publisher_block_margins ? 1 : 0) != 0;
   } else if (!strcmp(name, "font")) {
     bool has_fallback_attrs = false;
     for (i = 0; attr[i]; i += 2) {
@@ -184,6 +194,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     int style_paragraph_spacing = -1;
     int style_publisher_text_indent = -1;
     int style_publisher_block_margins = -1;
+    int style_publisher_horizontal_margins = -1;
     uint32_t last_opened = 0;
     int page_count = 0;
     uint32_t ms_per_page = 0;
@@ -220,6 +231,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       }
     }
 
+    style_publisher_horizontal_margins =
+        settings::ReadPublisherHorizontalMargins(
+            attr, style_publisher_block_margins);
+
     if (filename[0] && last_opened > 0)
       p->prefs->RememberSavedLastOpened(folder, filename, last_opened);
     if (filename[0]) {
@@ -227,7 +242,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           folder, filename, position, mobi_line_wrap_fix,
           style_font_size, style_line_spacing,
           style_paragraph_spacing, style_publisher_text_indent,
-          style_publisher_block_margins, last_opened);
+          style_publisher_block_margins,
+          style_publisher_horizontal_margins, last_opened);
       p->prefs->RememberSavedBookLibraryStats(folder, filename, page_count,
                                               ms_per_page);
       p->prefs->BeginSavedBookBookmarks(folder, filename);
@@ -241,7 +257,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           folder, filename, position, mobi_line_wrap_fix,
           style_font_size, style_line_spacing,
           style_paragraph_spacing, style_publisher_text_indent,
-          style_publisher_block_margins);
+          style_publisher_block_margins,
+          style_publisher_horizontal_margins);
     } else {
       std::vector<Book *>::iterator it;
       for (it = app->books.begin(); it < app->books.end(); it++) {
@@ -264,13 +281,17 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       matched->SetStyleParagraphSpacingOverride(style_paragraph_spacing);
       matched->SetStylePublisherTextIndentOverride(style_publisher_text_indent);
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
+      matched->SetStylePublisherHorizontalMarginsOverride(
+          style_publisher_horizontal_margins);
       if (last_opened > 0)
         matched->SetLastOpenedTime(last_opened);
       p->prefs->ApplySavedLibraryStats(matched);
+#if RECENT_BOOKS_TRACE
       DBG_LOGF(app, "recently-opened: read lastOpened=%lu matched=%s file=\"%s\"",
                (unsigned long)last_opened,
                matched ? "yes" : "no",
                filename);
+#endif
 
       if (current) {
         // Set this book as current.
@@ -408,7 +429,8 @@ int Prefs::Read() {
   last_opened_by_book_key.clear();
   saved_state_by_book_key.clear();
 
-  FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
+  FILE *fp = prefs_file_utils::OpenForRead(paths::GetPrefsFile(),
+                                          paths::GetPrefsBackupFile());
   if (!fp) {
     err = 255;
     return err;
@@ -453,6 +475,7 @@ void Prefs::ClearPendingCurrentBookRestore() {
   pending_current_style_paragraph_spacing = -1;
   pending_current_style_publisher_text_indent = -1;
   pending_current_style_publisher_block_margins = -1;
+  pending_current_style_publisher_horizontal_margins = -1;
   pending_current_bookmarks.clear();
 }
 
@@ -460,7 +483,8 @@ void Prefs::SetPendingCurrentBookRestore(
     const char *folder, const char *filename, int position,
     bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
     int style_paragraph_spacing,
-    int style_publisher_text_indent, int style_publisher_block_margins) {
+    int style_publisher_text_indent, int style_publisher_block_margins,
+    int style_publisher_horizontal_margins) {
   pending_current_book_restore = filename && filename[0];
   collecting_pending_current_book = pending_current_book_restore;
   pending_current_folder = folder ? folder : "";
@@ -473,6 +497,8 @@ void Prefs::SetPendingCurrentBookRestore(
   pending_current_style_publisher_text_indent = style_publisher_text_indent;
   pending_current_style_publisher_block_margins =
       style_publisher_block_margins;
+  pending_current_style_publisher_horizontal_margins =
+      style_publisher_horizontal_margins;
   pending_current_bookmarks.clear();
 }
 
@@ -505,6 +531,8 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
       pending_current_style_publisher_text_indent);
   matched->SetStylePublisherBlockMarginsOverride(
       pending_current_style_publisher_block_margins);
+  matched->SetStylePublisherHorizontalMarginsOverride(
+      pending_current_style_publisher_horizontal_margins);
   if (pending_current_position)
     matched->SetPosition(pending_current_position - 1);
   for (size_t i = 0; i < pending_current_bookmarks.size(); i++)
@@ -521,7 +549,8 @@ void Prefs::RememberSavedBookState(
     const char *folder, const char *filename, int position,
     bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
     int style_paragraph_spacing, int style_publisher_text_indent,
-    int style_publisher_block_margins, uint32_t last_opened) {
+    int style_publisher_block_margins,
+    int style_publisher_horizontal_margins, uint32_t last_opened) {
   if (!filename || !filename[0])
     return;
   SavedBookState state;
@@ -532,6 +561,8 @@ void Prefs::RememberSavedBookState(
   state.style_paragraph_spacing = style_paragraph_spacing;
   state.style_publisher_text_indent = style_publisher_text_indent;
   state.style_publisher_block_margins = style_publisher_block_margins;
+  state.style_publisher_horizontal_margins =
+      style_publisher_horizontal_margins;
   state.last_opened = last_opened;
   ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
 }
@@ -614,6 +645,8 @@ void Prefs::ApplySavedBookState(Book *book) const {
     book->SetStylePublisherTextIndentOverride(state.style_publisher_text_indent);
     book->SetStylePublisherBlockMarginsOverride(
         state.style_publisher_block_margins);
+    book->SetStylePublisherHorizontalMarginsOverride(
+        state.style_publisher_horizontal_margins);
     if (state.position > 0)
       book->SetPosition(state.position - 1);
     if (state.last_opened > 0)
@@ -631,15 +664,35 @@ void Prefs::ApplySavedBookState(Book *book) const {
     book->SetLastOpenedTime(it->second);
 }
 
-//! Write settings to prefs file.
-//! \return Error code.
+//! Coalesce rapid settings changes; normal exit still writes immediately.
+void Prefs::RequestWrite() {
+  write_pending = true;
+  write_due_ms = osGetTime() + 2000;
+}
+
+bool Prefs::FlushPendingWrite(bool force) {
+  if (!write_pending || (!force && osGetTime() < write_due_ms))
+    return false;
+  Write();
+  return true;
+}
+
+//! Write settings to a temporary file, then replace the current preferences.
+//! \return 0 on success, 255 on failure.
 int Prefs::Write() {
-  int err = 0;
+  const uint64_t write_start = osGetTime();
+  // Failed writes remain pending, but retries must not stall every frame.
+  write_pending = true;
+  write_due_ms = write_start + 5000;
   Text *ts = app ? app->ts.get() : nullptr;
 
-  FILE *fp = fopen(paths::GetPrefsFile().c_str(), "w");
-  if (!fp)
+  FILE *fp = fopen(paths::GetPrefsTempFile().c_str(), "wb");
+  if (!fp) {
+    write_due_ms = osGetTime() + 5000;
+    DBG_LOGF(app, "TIMING: prefs_write ms=%llu ok=0 reason=open_temp",
+             (unsigned long long)(osGetTime() - write_start));
     return 255;
+  }
 
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
@@ -714,10 +767,11 @@ int Prefs::Write() {
           font_mono_bolditalic.c_str(), fallback1.c_str(), fallback2.c_str(),
           fallback3.c_str(), fallback4.c_str());
   fprintf(fp,
-          "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" />\n",
+          "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" publisherHorizontalMargins=\"%d\" />\n",
           app->paraindent, app->paraspacing, app->reader_line_spacing,
           app->publisher_text_indent ? 1 : 0,
-          app->publisher_block_margins ? 1 : 0);
+          app->publisher_block_margins ? 1 : 0,
+          app->publisher_horizontal_margins ? 1 : 0);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
 
   // Merge the visible folder into the complete state loaded from disk. Browser
@@ -738,6 +792,8 @@ int Prefs::Write() {
         book->GetStylePublisherTextIndentOverride();
     state.style_publisher_block_margins =
         book->GetStylePublisherBlockMarginsOverride();
+    state.style_publisher_horizontal_margins =
+        book->GetStylePublisherHorizontalMarginsOverride();
     state.last_opened = book->GetLastOpenedTime();
     state.page_count = book->GetLibraryPageCount();
     state.ms_per_page = book->GetLibraryMsPerPage();
@@ -779,10 +835,15 @@ int Prefs::Write() {
     if (state.style_publisher_block_margins >= 0)
       fprintf(fp, " publisherBlockMargins=\"%d\"",
               state.style_publisher_block_margins);
+    // Persist inherit (-1) too: absence means an old combined-margin setting.
+    fprintf(fp, " publisherHorizontalMargins=\"%d\"",
+            state.style_publisher_horizontal_margins);
     if (state.last_opened > 0) {
       fprintf(fp, " lastOpened=\"%lu\"", (unsigned long)state.last_opened);
+#if RECENT_BOOKS_TRACE
       DBG_LOGF(app, "recently-opened: write lastOpened=%lu for \"%s\"",
                (unsigned long)state.last_opened, filename.c_str());
+#endif
     }
     if (state.page_count > 0)
       fprintf(fp, " pages=\"%d\"", state.page_count);
@@ -810,12 +871,21 @@ int Prefs::Write() {
 
   fprintf(fp, "</dslibris>\n");
   fprintf(fp, "\n");
-  fclose(fp);
-
-  return err;
+  const bool ok = prefs_file_utils::Commit(fp, paths::GetPrefsFile(),
+                                          paths::GetPrefsTempFile(),
+                                          paths::GetPrefsBackupFile());
+  write_pending = !ok;
+  if (!ok)
+    write_due_ms = osGetTime() + 5000;
+  DBG_LOGF(app, "TIMING: prefs_write ms=%llu ok=%u books=%u",
+           (unsigned long long)(osGetTime() - write_start), ok ? 1u : 0u,
+           (unsigned)saved_state_by_book_key.size());
+  return ok ? 0 : 255;
 }
 
 void Prefs::Init() {
+  write_pending = false;
+  write_due_ms = 0;
   modtime = 0; // fill this in with gettimeofday()
   swapshoulder = false;
   time24h = true;

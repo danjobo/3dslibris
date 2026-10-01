@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 #include "book/book.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
@@ -23,12 +24,28 @@ static const u32 kCbzInteractiveDeferredDelayMs = 180;
 static const u32 kCbzPreloadDeferredDelayMs = 600;
 
 inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
-                           int page_index, int zoom_index) {
-  return page_bitmap.page == page_index &&
-         page_bitmap.zoom_index >= zoom_index &&
-         page_bitmap.bitmap.width > 0 &&
-         page_bitmap.bitmap.height > 0 &&
-         !page_bitmap.bitmap.pixels.empty();
+                           int page_index, int zoom_index,
+                           int target_width, int target_height) {
+  if (page_bitmap.page != page_index || page_bitmap.bitmap.width <= 0 ||
+      page_bitmap.bitmap.height <= 0 || page_bitmap.bitmap.pixels.empty())
+    return false;
+  if (page_bitmap.zoom_index >= zoom_index)
+    return true;
+  if (page_bitmap.original_width <= 0 || page_bitmap.original_height <= 0 ||
+      target_width <= 0 || target_height <= 0)
+    return false;
+
+  // JPEG subsampling can return more pixels than the requested zoom needs.
+  // Reuse them only if BOTH dimensions cover the new target; never require
+  // more than the original image contains. Keeping the unrounded target is
+  // conservative at fractional boundaries (at worst we decode once more).
+  const float fit_scale = std::min(
+      (float)target_width / page_bitmap.original_width,
+      (float)target_height / page_bitmap.original_height);
+  const float scale = std::min(1.0f,
+      fit_scale * pdf_view_utils::ZoomForIndex(zoom_index));
+  return page_bitmap.bitmap.width >= page_bitmap.original_width * scale &&
+         page_bitmap.bitmap.height >= page_bitmap.original_height * scale;
 }
 
 inline int ClampCbzPageIndex(int page_index, u16 page_count) {
@@ -200,29 +217,50 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
     return false;
   if (cbz_state->failed_page == page_index)
     return false;
-  if (CbzSourceValid(cbz_state->current_source, page_index, zoom_index))
+  if (CbzSourceValid(cbz_state->current_source, page_index, zoom_index,
+                     cbz_state->target_top_width, cbz_state->target_top_height)) {
+    if (zoom_index > cbz_state->current_source.zoom_index) {
+      const CbzBitmap &bitmap = cbz_state->current_source.bitmap;
+      fixed_perf::Record(&cbz_state->entries, page_index, zoom_index,
+                         "cbz.reuse_source", 0, 1,
+                         bitmap.pixels.size() * sizeof(u16),
+                         bitmap.width, bitmap.height);
+    }
     return true;
+  }
 
+  fixed_perf::Timer perf_read(&cbz_state->entries, page_index, zoom_index, "cbz.read_zip");
   std::vector<unsigned char> bytes;
-  if (!ReadCbzArchiveEntryBytes(cbz_state->archive_path,
+  if (!cbz_state->archive_reader.Read(cbz_state->archive_path,
                                 cbz_state->entries[(size_t)page_index], &bytes,
                                 format_limits::kMaxCbzPageEntryBytes)) {
+    perf_read.End(0);
     cbz_state->last_error = GetLastCbzArchiveError();
     cbz_state->failed_page = page_index;
     return false;
   }
 
+  perf_read.End(1, bytes.size());
+  fixed_perf::Timer perf_decode(&cbz_state->entries, page_index, zoom_index, "cbz.decode");
   CbzDecodedPage decoded;
   int used_zoom_index = -1;
+  // At low zoom, a JPEG decoded close to the displayed size makes fine comic
+  // text blurry. Keep the synchronous source at least at the 2x-fit preset;
+  // the existing fallback still permits smaller decodes if one fails.
+  const int decode_zoom_index = debug_runtime::ForceSynchronousCbzDecode()
+                                    ? std::max(zoom_index, 4)
+                                    : zoom_index;
   if (!DecodeCbzPageImageWithFallback(
-          bytes, zoom_index, cbz_state->target_top_width,
+          bytes, decode_zoom_index, cbz_state->target_top_width,
           cbz_state->target_top_height, &decoded,
                                       &used_zoom_index)) {
+    perf_decode.End(0, bytes.size());
     cbz_state->last_error = GetLastCbzDecodeError();
     cbz_state->failed_page = page_index;
     return false;
   }
 
+  perf_decode.End(1, bytes.size(), decoded.source_bitmap.width, decoded.source_bitmap.height);
   cbz_state->failed_page = -1;
   cbz_state->logged_failed_page = -1;
   cbz_state->last_error.clear();
@@ -245,7 +283,11 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
   PromoteCbzAdjacentSlotIfMatching(cbz_state, page_index);
   if (CbzPreviewCacheValid(cbz_state->current_preview, page_index))
     return true;
-  if (!EnsureCbzSourceLoaded(cbz_state, page_index, 0))
+  // Synchronous drawing needs both caches before presenting. Decode once at
+  // the requested zoom so the preview and interactive view share the source.
+  const int source_zoom = debug_runtime::ForceSynchronousCbzDecode()
+                              ? cbz_state->viewport.zoom_index : 0;
+  if (!EnsureCbzSourceLoaded(cbz_state, page_index, source_zoom))
     return false;
 
   const pdf_view_utils::PreviewLayout preview_layout =
@@ -255,12 +297,15 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
               2 * fixed_layout_preview::kPadding,
           cbz_state->target_bottom_height -
               2 * fixed_layout_preview::kPadding);
+  fixed_perf::Timer perf_scale(&cbz_state->entries, page_index, cbz_state->viewport.zoom_index, "cbz.scale_preview");
   CbzBitmap scaled;
   if (!ScaleCbzBitmap(cbz_state->current_source.bitmap,
                       std::max(1, preview_layout.width),
                       std::max(1, preview_layout.height), true, &scaled)) {
+    perf_scale.End(0);
     return false;
   }
+  perf_scale.End(1, scaled.pixels.size()*sizeof(u16), scaled.width, scaled.height);
 
   cbz_state->current_preview.page = page_index;
   cbz_state->current_preview.zoom_index = -1;
@@ -281,6 +326,15 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
   if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->viewport.zoom_index))
     return false;
 
+  // In the synchronous reader the decoded source already covers this zoom.
+  // Blit directly from it instead of allocating and scaling a second bitmap.
+  if (debug_runtime::ForceSynchronousCbzDecode() &&
+      CbzSourceValid(cbz_state->current_source, page_index,
+                     cbz_state->viewport.zoom_index,
+                     cbz_state->target_top_width,
+                     cbz_state->target_top_height))
+    return true;
+
   const float fit_scale =
       std::min((float)cbz_state->target_top_width /
                    std::max(1.0f, cbz_state->page_width),
@@ -294,14 +348,17 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
       1, std::min(cbz_state->current_source.bitmap.height,
                   (int)(cbz_state->page_height * fit_scale * zoom + 0.5f)));
 
+  fixed_perf::Timer perf_scale(&cbz_state->entries, page_index, cbz_state->viewport.zoom_index, "cbz.scale_interactive");
   CbzBitmap scaled;
   // The interactive cache is for drag/page-turn responsiveness, not final
   // quality. Use the fast scaler here and keep HQ filtering only at blit time
   // when the viewer is idle.
   if (!ScaleCbzBitmap(cbz_state->current_source.bitmap, target_width,
                       target_height, false, &scaled)) {
+    perf_scale.End(0);
     return false;
   }
+  perf_scale.End(1, scaled.pixels.size()*sizeof(u16), scaled.width, scaled.height);
 
   cbz_state->current_interactive.page = page_index;
   cbz_state->current_interactive.zoom_index = cbz_state->viewport.zoom_index;
@@ -311,27 +368,28 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
   return true;
 }
 
-bool BlitCbzCacheViewport(Text *ts, u16 *screen, int logical_height,
-                          int draw_width, int draw_height,
-                          const Book::CbzState::BitmapCache &cache,
-                          const pdf_view_utils::NormalizedRect &viewport,
-                          bool high_quality_filter) {
-  if (!ts || !screen || cache.bitmap_width <= 0 || cache.bitmap_height <= 0 ||
-      cache.pixels.empty())
+bool BlitCbzViewport(Text *ts, u16 *screen, int logical_height,
+                     int draw_width, int draw_height,
+                     const std::vector<u16> &pixels,
+                     int bitmap_width, int bitmap_height,
+                     const pdf_view_utils::NormalizedRect &viewport,
+                     bool high_quality_filter) {
+  if (!ts || !screen || bitmap_width <= 0 || bitmap_height <= 0 ||
+      pixels.empty())
     return false;
 
   const int crop_x = std::max(
-      0, std::min(cache.bitmap_width - 1,
-                  (int)(viewport.left * cache.bitmap_width + 0.5f)));
+      0, std::min(bitmap_width - 1,
+                  (int)(viewport.left * bitmap_width + 0.5f)));
   const int crop_y = std::max(
-      0, std::min(cache.bitmap_height - 1,
-                  (int)(viewport.top * cache.bitmap_height + 0.5f)));
+      0, std::min(bitmap_height - 1,
+                  (int)(viewport.top * bitmap_height + 0.5f)));
   const int crop_w = std::max(
-      1, std::min(cache.bitmap_width - crop_x,
-                  (int)(viewport.width * cache.bitmap_width + 0.5f)));
+      1, std::min(bitmap_width - crop_x,
+                  (int)(viewport.width * bitmap_width + 0.5f)));
   const int crop_h = std::max(
-      1, std::min(cache.bitmap_height - crop_y,
-                  (int)(viewport.height * cache.bitmap_height + 0.5f)));
+      1, std::min(bitmap_height - crop_y,
+                  (int)(viewport.height * bitmap_height + 0.5f)));
 
   const pdf_view_utils::PreviewLayout layout =
       pdf_view_utils::ComputePreviewLayout((float)crop_w, (float)crop_h,
@@ -339,10 +397,20 @@ bool BlitCbzCacheViewport(Text *ts, u16 *screen, int logical_height,
 
   fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
       ts, screen, logical_height, layout.x, layout.y, layout.width,
-      layout.height, cache.pixels,
-      cache.bitmap_width, cache.bitmap_height, crop_x, crop_y, crop_w, crop_h,
+      layout.height, pixels,
+      bitmap_width, bitmap_height, crop_x, crop_y, crop_w, crop_h,
       high_quality_filter);
   return true;
+}
+
+bool BlitCbzCacheViewport(Text *ts, u16 *screen, int logical_height,
+                          int draw_width, int draw_height,
+                          const Book::CbzState::BitmapCache &cache,
+                          const pdf_view_utils::NormalizedRect &viewport,
+                          bool high_quality_filter) {
+  return BlitCbzViewport(ts, screen, logical_height, draw_width, draw_height,
+                         cache.pixels, cache.bitmap_width, cache.bitmap_height,
+                         viewport, high_quality_filter);
 }
 
 void DrawCbzPreviewPanel(Book *book, Text *ts,
@@ -432,6 +500,8 @@ void Book::ResetCbzTransientViewState(bool restart_worker) {
     return;
 
   ShutdownCbzWorker(cbz_state);
+  // Reopen lazily after HOME/resume instead of reusing an old SD handle.
+  cbz_state->archive_reader.Close();
   InitCbzWorker(cbz_state);
 }
 
@@ -467,6 +537,9 @@ void Book::DrawCurrentCbzView(Text *ts) {
 
   const int page_index = ClampCbzPageIndex(GetPosition(), cbz_state->page_count);
   SetPosition(page_index);
+  fixed_perf::BeginView(&cbz_state->entries, "CBZ", GetFileName(), page_index,
+                       cbz_state->viewport.zoom_index,
+                       cbz_state->target_top_width, cbz_state->target_top_height);
 
   if (cbz_state->current_preview.page != page_index)
     ResetCbzBitmapCache(&cbz_state->current_preview);
@@ -492,12 +565,21 @@ void Book::DrawCurrentCbzView(Text *ts) {
     return;
   }
 
-  // In synchronous mode, render interactive cache immediately after preview.
-  // This gives proper zoom-aware resolution without background threads.
-  if (debug_runtime::ForceSynchronousCbzDecode() &&
+  // Keep a scaled fallback only when the decoded source cannot cover the
+  // requested zoom (for example after a lower-resolution decode fallback).
+  bool use_source = debug_runtime::ForceSynchronousCbzDecode() &&
+      CbzSourceValid(cbz_state->current_source, page_index,
+                     cbz_state->viewport.zoom_index,
+                     cbz_state->target_top_width,
+                     cbz_state->target_top_height);
+  if (debug_runtime::ForceSynchronousCbzDecode() && !use_source &&
       !CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
                            cbz_state->viewport.zoom_index)) {
     EnsureCbzInteractiveCache(cbz_state, page_index);
+    use_source = CbzSourceValid(cbz_state->current_source, page_index,
+                                cbz_state->viewport.zoom_index,
+                                cbz_state->target_top_width,
+                                cbz_state->target_top_height);
   }
 
   const pdf_view_utils::NormalizedRect viewport =
@@ -522,7 +604,15 @@ void Book::DrawCurrentCbzView(Text *ts) {
 
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
-  if (has_interactive) {
+  if (use_source) {
+    const CbzBitmap &source = cbz_state->current_source.bitmap;
+    BlitCbzViewport(ts, ts->screenleft,
+                    cbz_state->target_top_height,
+                    cbz_state->target_top_width,
+                    cbz_state->target_top_height,
+                    source.pixels, source.width, source.height,
+                    viewport, high_quality_viewport);
+  } else if (has_interactive) {
     BlitCbzCacheViewport(ts, ts->screenleft,
                          cbz_state->target_top_height,
                          cbz_state->target_top_width,
@@ -539,6 +629,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
   }
   DrawCbzPreviewPanel(this, ts, cbz_state, page_index, preview_layout,
                       viewport);
+  fixed_perf::Drawn(use_source || has_interactive ? 2 : 1);
 }
 
 void Book::SetCbzViewportInteraction(bool active) {

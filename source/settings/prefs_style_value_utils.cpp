@@ -1,8 +1,23 @@
 #include "settings/prefs_style_value_utils.h"
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace settings {
+
+int ReadPublisherHorizontalMargins(const char *const *attributes,
+                                   int legacy_margins) {
+  if (attributes) {
+    for (int i = 0; attributes[i]; i += 2) {
+      if (!strcmp(attributes[i], "publisherHorizontalMargins")) {
+        const int value = atoi(attributes[i + 1]);
+        return value < 0 ? -1 : (value != 0 ? 1 : 0);
+      }
+    }
+  }
+  return legacy_margins;
+}
 
 int EffectiveStyleValue(const StyleValueContext &context) {
   if (context.from_book && context.override_value >= 0)

@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // MuPDF draw dispatch: screen blit helpers, deferred work pump, DrawCurrentMuPdfView.
 // Viewport state management is in mupdf_viewport.cpp.
@@ -398,7 +399,12 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
 
   const int page_index = ClampMuPdfPageIndex(position, mupdf_state->page_count);
   position = page_index;
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  fixed_perf::BeginView(mupdf_state->doc, "PDF", GetFileName(), page_index,
+                       mupdf_state->viewport.zoom_index,
+                       mupdf_state->target_top_width, mupdf_state->target_top_height);
+  const uint64_t perf_draw_start = fixed_perf::Now();
+  uint64_t perf_phase = perf_draw_start;
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: enter page=%d page_count=%u zoom=%d doc_kind=%d",
                page_index, (unsigned)mupdf_state->page_count,
                mupdf_state->viewport.zoom_index, (int)mupdf_state->document_kind);
@@ -412,14 +418,19 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     ResetBitmapCache(&mupdf_state->current_final_zoom);
 
   EnsureMuPdfPageMetrics(mupdf_state, page_index);
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: after-metrics page=%d size=(%.2f,%.2f)",
                page_index, (double)mupdf_state->page_width,
                (double)mupdf_state->page_height);
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: preview-cache-begin page=%d", page_index);
 
-  if (!EnsureCurrentMuPdfPreviewCache(mupdf_state, page_index)) {
+  fixed_perf::ViewStage("pdf.prepare", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
+  const bool preview_ok = EnsureCurrentMuPdfPreviewCache(mupdf_state, page_index);
+  fixed_perf::ViewStage("pdf.ensure_preview", fixed_perf::Now() - perf_phase,
+                        preview_ok ? 1 : 0);
+  if (!preview_ok) {
     IStatusReporter *reporter = GetStatusReporter();
     if (reporter) {
       DBG_LOGF_CAT(reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
@@ -433,11 +444,12 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     return;
   }
 
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: preview-cache-done page=%d bmp=%dx%d", page_index,
                mupdf_state->current_preview.bitmap_width,
                mupdf_state->current_preview.bitmap_height);
 
+  perf_phase = fixed_perf::Now();
   // In synchronous mode, render the interactive tile immediately after preview.
   // This gives proper zoom-aware resolution without background threads.
   if (debug_runtime::ForceSynchronousMuPdfRender() &&
@@ -445,6 +457,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index);
   }
 
+  fixed_perf::ViewStage("pdf.ensure_interactive", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   pdf_view_utils::NormalizedRect viewport = ComputeCurrentMuPdfViewport(mupdf_state);
   mupdf_state->viewport.center_x = viewport.left + viewport.width * 0.5f;
   mupdf_state->viewport.center_y = viewport.top + viewport.height * 0.5f;
@@ -479,9 +493,11 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   ts->SetStyle(TEXT_STYLE_BROWSER);
   ts->margin.bottom = 0;
 
+  fixed_perf::ViewStage("pdf.view_setup", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: left-screen-blit-begin page=%d final=%d interactive=%d incremental=%d",
                page_index, has_final_cache ? 1 : 0,
                has_interactive_tile ? 1 : 0,
@@ -570,6 +586,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
       ts->PrintString("MuPDF render unavailable");
     }
   }
+  fixed_perf::ViewStage("pdf.blit_main", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();
   DrawBottomGradientBackground();
@@ -577,6 +595,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
 
+  fixed_perf::ViewStage("pdf.preview_background", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   if (!mupdf_state->current_preview.pixels.empty() &&
       mupdf_state->current_preview.bitmap_width > 0 &&
       mupdf_state->current_preview.bitmap_height > 0) {
@@ -589,6 +609,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
         mupdf_state->current_preview.bitmap_width,
         mupdf_state->current_preview.bitmap_height, true);
   }
+  fixed_perf::ViewStage("pdf.blit_preview", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfFrame);
@@ -607,7 +629,10 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   ts->SetColorMode(saved_color);
   ts->SetScreen(saved_screen);
   ts->margin.bottom = saved_bottom_margin;
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+  fixed_perf::ViewStage("pdf.overlay", fixed_perf::Now() - perf_phase);
+  fixed_perf::ViewStage("pdf.draw_total", fixed_perf::Now() - perf_draw_start);
+  fixed_perf::Drawn(has_final_cache ? 3 : has_interactive_tile ? 2 : 1);
+  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: end page=%d", page_index);
 }
 

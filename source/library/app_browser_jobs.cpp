@@ -48,7 +48,7 @@
 #endif
 
 #ifndef BROWSER_JOB_TRACE
-#define BROWSER_JOB_TRACE 0
+#define BROWSER_JOB_TRACE 1
 #endif
 
 namespace {
@@ -413,8 +413,15 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           book->ClearBrowserDisplayNameCache();
           if (book == app_.GetSelectedBook())
             ResetBrowserMarquee();
+          const browser_cover_cache_utils::VisibleRange visible =
+              browser_cover_cache_utils::ComputeVisibleRange(
+                  app_.GetBrowserPageStart(), app_.BookCount(),
+                  CurrentBrowserPageSize(app_));
+          if (app_.GetMode() == AppMode::Browser &&
+              browser_cover_cache_utils::VisibleBookNeedsBrowserRedraw(
+                  visible, app_.GetBookIndex(book)))
+            app_.SetBrowserDirty(true);
         }
-        app_.SetBrowserDirty(true);
       }
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
       if (!book->coverPixels && book->coverAttempts < kCoverMaxAttempts) {
@@ -493,7 +500,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           if (browser_cover_cache_utils::VisibleBookNeedsBrowserRedraw(
                   visible, book_index)) {
             ResetBrowserMarquee();
-            app_.ts->MarkAllScreensDirty();
+            app_.ts->MarkScreenDirty(app_.ts->screenright);
             app_.SetBrowserDirty(true);
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
             DBG_LOGF(&app_,
@@ -590,7 +597,10 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     if (app_.ShouldAbortWork())
       break;
 
-    if (osGetTime() - start_ms >= budget_ms)
+    // A single cover can exceed the nominal budget. Return to input after
+    // every browser job rather than starting another non-preemptible task.
+    if (app_.GetMode() == AppMode::Browser ||
+        osGetTime() - start_ms >= budget_ms)
       break;
   }
 }

@@ -81,7 +81,10 @@ enum class MuPdfDeferredStage {
 void InitMuPdfLocks();
 void EnsureGrayLut();
 bool DetectNew3ds();
-u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b);
+// Keep the tiny conversion visible to callers: it runs once per output pixel.
+inline u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
+  return (u16)(((u16)(r >> 3) << 11) | ((u16)(g >> 2) << 5) | (u16)(b >> 3));
+}
 void RGB565ToRgb8(u16 pixel, int *r, int *g, int *b);
 bool IsMostlyWhite(u16 pixel);
 float ComputeFitScale(float page_width, float page_height, int target_width,

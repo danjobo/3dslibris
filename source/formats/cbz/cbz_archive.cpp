@@ -1,4 +1,5 @@
 #include "formats/cbz/cbz_archive.h"
+#include "shared/fixed_layout_perf.h"
 
 #include "formats/common/zip_read_utils.h"
 #include "formats/common/xml_parse_utils.h"
@@ -84,6 +85,48 @@ bool IsSupportedCbzImagePath(const std::string &path) {
   return HasExtCI(name, ".jpg") ||
          HasExtCI(name, ".jpeg") ||
          HasExtCI(name, ".png");
+}
+
+bool IsAsciiDigit(char c) {
+  return c >= '0' && c <= '9';
+}
+
+bool NaturalPathLess(const std::string &a, const std::string &b) {
+  size_t i = 0, j = 0;
+  while (i < a.size() && j < b.size()) {
+    if (IsAsciiDigit(a[i]) && IsAsciiDigit(b[j])) {
+      size_t a_end = i, b_end = j;
+      while (a_end < a.size() && IsAsciiDigit(a[a_end]))
+        a_end++;
+      while (b_end < b.size() && IsAsciiDigit(b[b_end]))
+        b_end++;
+      size_t a_digits = i, b_digits = j;
+      while (a_digits < a_end && a[a_digits] == '0')
+        a_digits++;
+      while (b_digits < b_end && b[b_digits] == '0')
+        b_digits++;
+
+      // Compare arbitrary-length numbers without conversion or allocation.
+      if (a_end - a_digits != b_end - b_digits)
+        return a_end - a_digits < b_end - b_digits;
+      for (size_t n = 0; n < a_end - a_digits; n++) {
+        if (a[a_digits + n] != b[b_digits + n])
+          return a[a_digits + n] < b[b_digits + n];
+      }
+      // Equal values: fewer leading zeroes first. Resolve this before the
+      // rest of the path so distinct directory names stay grouped together.
+      if (a_end - i != b_end - j)
+        return a_end - i < b_end - j;
+      i = a_end;
+      j = b_end;
+    } else {
+      if (a[i] != b[j])
+        return (unsigned char)a[i] < (unsigned char)b[j];
+      i++;
+      j++;
+    }
+  }
+  return i == a.size() && j < b.size();
 }
 
 struct ZipEntryInfo {
@@ -235,7 +278,7 @@ bool IndexCbzArchiveEntries(const std::string &archive_path,
 
   std::sort(entries->begin(), entries->end(),
             [](const CbzPageEntry &a, const CbzPageEntry &b) {
-              return a.normalized_path < b.normalized_path;
+              return NaturalPathLess(a.normalized_path, b.normalized_path);
             });
 
   if (entries->empty()) {
@@ -246,7 +289,18 @@ bool IndexCbzArchiveEntries(const std::string &archive_path,
   return true;
 }
 
-bool ReadCbzArchiveEntryBytes(const std::string &archive_path,
+CbzArchiveReader::CbzArchiveReader() : archive_(NULL), path_() {}
+
+CbzArchiveReader::~CbzArchiveReader() { Close(); }
+
+void CbzArchiveReader::Close() {
+  if (archive_)
+    unzClose(archive_);
+  archive_ = NULL;
+  path_.clear();
+}
+
+bool CbzArchiveReader::Read(const std::string &archive_path,
                               const CbzPageEntry &entry,
                               std::vector<unsigned char> *out,
                               size_t max_bytes) {
@@ -256,23 +310,62 @@ bool ReadCbzArchiveEntryBytes(const std::string &archive_path,
   out->clear();
   SetLastCbzArchiveError("");
 
-  ScopedZipArchive archive(archive_path);
-  if (!archive.ok()) {
-    SetLastCbzArchiveError("unable to reopen CBZ archive");
-    return false;
+  // Entry identity is separate from the viewer identity. Preserve both names
+  // so reads for covers/prefetch can also be attributed without global state.
+  fixed_perf::Document(&entry, "CBZ_ZIP", archive_path.c_str());
+  fixed_perf::Document(&entry, "CBZ_ENTRY", entry.path.c_str());
+  if (archive_ && path_ != archive_path)
+    Close();
+  if (!archive_) {
+    fixed_perf::Timer perf_open(&entry, -1, -1, "cbz.zip_open");
+    archive_ = unzOpen(archive_path.c_str());
+    perf_open.End(archive_ ? 1 : 0);
+    if (!archive_) {
+      SetLastCbzArchiveError("unable to reopen CBZ archive");
+      return false;
+    }
+    path_ = archive_path;
+  } else {
+    fixed_perf::Record(&entry, -1, -1, "cbz.zip_reuse", 0, 1);
   }
 
-  if (entry.offset != 0 && unzSetOffset(archive.uf, entry.offset) == UNZ_OK) {
-    if (ReadLocatedZipEntry(archive.uf, out, max_bytes))
+  const auto read_entry = [&]() {
+    fixed_perf::Timer perf_read(&entry, -1, -1, "cbz.zip_read_inflate");
+    const bool ok = ReadLocatedZipEntry(archive_, out, max_bytes);
+    perf_read.End(ok ? 1 : 0, out->size());
+    return ok;
+  };
+  if (entry.offset != 0) {
+    fixed_perf::Timer perf_locate(&entry, -1, -1, "cbz.zip_locate_offset");
+    const int rc = unzSetOffset(archive_, entry.offset);
+    perf_locate.End(rc == UNZ_OK ? 1 : 0);
+    if (rc == UNZ_OK && read_entry())
       return true;
   }
 
-  if (unzLocateFile(archive.uf, entry.path.c_str(), 2) != UNZ_OK) {
+  fixed_perf::Timer perf_locate(&entry, -1, -1, "cbz.zip_locate_name");
+  const int rc = unzLocateFile(archive_, entry.path.c_str(), 2);
+  perf_locate.End(rc == UNZ_OK ? 1 : 0);
+  if (rc != UNZ_OK) {
     SetLastCbzArchiveError("zip entry locate failed");
+    Close();
     return false;
   }
 
-  return ReadLocatedZipEntry(archive.uf, out, max_bytes);
+  const bool ok = read_entry();
+  if (!ok)
+    Close();
+  else
+    SetLastCbzArchiveError("");
+  return ok;
+}
+
+bool ReadCbzArchiveEntryBytes(const std::string &archive_path,
+                              const CbzPageEntry &entry,
+                              std::vector<unsigned char> *out,
+                              size_t max_bytes) {
+  CbzArchiveReader reader;
+  return reader.Read(archive_path, entry, out, max_bytes);
 }
 
 const char *GetLastCbzArchiveError() {

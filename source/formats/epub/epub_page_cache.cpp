@@ -37,7 +37,9 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 13;
+// Above both sides of the v2.9.1 merge (13 here, 17 upstream): both changed
+// layout output.
+static const u16 kEpubPageCacheVersion = 18;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 // Bulk-loading cache files duplicates memory (file buffer + decoded pages).
 // Very large caches can spike memory and crash on reopen, so skip them.
@@ -129,6 +131,8 @@ static std::string BuildCachePath(Book *book, const char *book_path,
       book && book->GetPublisherTextIndentEnabled() ? "i1" : "i0";
   layout_params.variant_token +=
       book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
+  layout_params.variant_token +=
+      book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".epc", book_path, layout_params);
 }

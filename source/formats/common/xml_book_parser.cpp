@@ -28,6 +28,12 @@ static void InitParsedataWithDeps(parsedata_t *parsedata, Book *book,
   parse_init(parsedata);
   parsedata->reporter = deps.reporter;
   parsedata->ts = deps.ts;
+  if (deps.ts) {
+    // Style markers may precede the first glyph; do not rely on an empty
+    // page buffer to initialize the same baseline used by Page::Draw.
+    parsedata->pen.x = deps.ts->margin.left;
+    parsedata->pen.y = deps.ts->margin.top + deps.ts->GetHeight();
+  }
   parsedata->prefs = deps.prefs;
   parsedata->book = book;
 }

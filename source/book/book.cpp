@@ -109,6 +109,7 @@ Book::Book(const BookContext &c) : ctx(c) {
   style_paragraph_spacing_override = -1;
   style_publisher_text_indent_override = -1;
   style_publisher_block_margins_override = -1;
+  style_publisher_horizontal_margins_override = -1;
   browser_display_name_cached = false;
   browser_folder_entry = false;
   inline_image_zip_index_built = false;
@@ -194,6 +195,14 @@ bool Book::GetPublisherBlockMarginsEnabled() const {
   return ctx.publisher_block_margins ? *ctx.publisher_block_margins : true;
 }
 
+bool Book::GetPublisherHorizontalMarginsEnabled() const {
+  if (style_publisher_horizontal_margins_override >= 0)
+    return style_publisher_horizontal_margins_override != 0;
+  return ctx.publisher_horizontal_margins
+             ? *ctx.publisher_horizontal_margins
+             : true;
+}
+
 int Book::GetStyleParagraphSpacingOverride() const {
   return style_paragraph_spacing_override;
 }
@@ -216,6 +225,14 @@ int Book::GetStylePublisherBlockMarginsOverride() const {
 
 void Book::SetStylePublisherBlockMarginsOverride(int value) {
   style_publisher_block_margins_override = value;
+}
+
+int Book::GetStylePublisherHorizontalMarginsOverride() const {
+  return style_publisher_horizontal_margins_override;
+}
+
+void Book::SetStylePublisherHorizontalMarginsOverride(int value) {
+  style_publisher_horizontal_margins_override = value;
 }
 
 int Book::GetOrientation() {

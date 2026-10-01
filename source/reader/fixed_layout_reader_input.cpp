@@ -10,6 +10,7 @@
 #include "reader/fixed_layout_reader_input.h"
 
 #include <math.h>
+#include <algorithm>
 #include <3ds.h>
 
 #include "app/app.h"
@@ -183,8 +184,8 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
   }
 
   // Circle Pad / C-Stick smooth viewport pan.
+  static int s_viewport_stick_active_frames = 0;
   if (!app.IsPdfTouchDragActive()) {
-    static int s_viewport_stick_active_frames = 0;
     circlePosition cpad;
     circlePosition cstick = {0, 0};
     hidCircleRead(&cpad);
@@ -202,8 +203,10 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
         BuildViewportStickAxis(-(int)cstick.dy, kViewportCStickDeadZone,
                                kViewportStickBaseScale);
     const bool stick_active = (physical_x != 0.0f || physical_y != 0.0f);
-    s_viewport_stick_active_frames =
-        stick_active ? (s_viewport_stick_active_frames + 1) : 0;
+    const bool stick_was_active = s_viewport_stick_active_frames > 0;
+    s_viewport_stick_active_frames = stick_active
+        ? std::min(s_viewport_stick_active_frames + 1, kViewportStickAccelFrames)
+        : 0;
 
     float viewport_dx = 0.0f;
     float viewport_dy = 0.0f;
@@ -219,7 +222,17 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
       book_nav::DrawPage(book, ts);
       status_dirty = true;
       delay_deferred();
+    } else if (!stick_active && stick_was_active) {
+      // Like stylus release, replace the last fast pan frame with a filtered
+      // frame. Synchronous PDF/CBZ have no deferred job to trigger this redraw.
+      book_renderer::SetFixedLayoutViewportInteraction(book, false);
+      book_nav::DrawPage(book, ts);
+      status_dirty = true;
+      delay_deferred();
     }
+  } else {
+    // Stylus release owns the final redraw if touch takes over a pad gesture.
+    s_viewport_stick_active_frames = 0;
   }
 
   if (!status_dirty &&

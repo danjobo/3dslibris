@@ -128,6 +128,7 @@ struct TestCtx {
   unsigned char paragraph_indent;
   bool publisher_text_indent;
   bool publisher_block_margins;
+  bool publisher_horizontal_margins;
 
   TestCtx() {
     ctx.text = &text;
@@ -137,10 +138,12 @@ struct TestCtx {
     paragraph_indent = 0;
     publisher_text_indent = true;
     publisher_block_margins = true;
+    publisher_horizontal_margins = true;
     ctx.paragraph_spacing = &paragraph_spacing;
     ctx.paragraph_indent = &paragraph_indent;
     ctx.publisher_text_indent = &publisher_text_indent;
     ctx.publisher_block_margins = &publisher_block_margins;
+    ctx.publisher_horizontal_margins = &publisher_horizontal_margins;
     ctx.orientation = nullptr;
     ctx.draw_background = nullptr;
     ctx.draw_background_user_data = nullptr;
@@ -268,6 +271,64 @@ void TestUserParagraphSpacingAddsExtraBlankLines() {
   const int len = book.GetPage(0)->GetLength();
   ExpectTrue("paragraph-spacing: extra blank lines emitted",
              CountBufValue(buf, len, '\n') >= 3);
+}
+
+void TestSemanticPageBreakVisibility() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  const std::string html =
+      "<html><body><p>BEFORE"
+      "<span aria-hidden=\"true\" epub:type=\"pagebreak\"><b>HIDDENONE</b></span>"
+      "<span aria-hidden=\"TRUE\" epub:type=\"footnote pagebreak\">HIDDENTWO</span>"
+      "<span aria-hidden=\"yes\" role=\"doc-pagebreak\">HIDDENTHREE</span>"
+      "<span epub:type=\"pagebreak\" role=\"doc-pagebreak\">VISIBLEBREAK</span>"
+      "<span aria-hidden=\"true\" id=\"other\">HIDDENUNRELATED</span>"
+      "<span aria-hidden=\"false\" epub:type=\"pagebreak\">VISIBLEFALSE</span>"
+      "AFTER</p></body></html>";
+  ExpectTrue("semantic pagebreak XML parses",
+             xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  ExpectTrue("semantic pagebreak produces page", book.GetPageCount() > 0);
+  const std::string visible = ExtractVisibleAsciiFromPages(book);
+  ExpectTrue("cosmetic pagebreak text is suppressed", visible.find("HIDDEN") == std::string::npos);
+  ExpectTrue("visible semantic pagebreak stays readable", visible.find("VISIBLEBREAK") != std::string::npos);
+  ExpectTrue("false aria-hidden semantic break stays readable", visible.find("VISIBLEFALSE") != std::string::npos);
+  ExpectTrue("text before and after pagebreak remains", visible.find("BEFORE") != std::string::npos && visible.find("AFTER") != std::string::npos);
+  for (int i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    ExpectFalse("hidden pagebreak nested formatting cannot leak", BufContains(page->GetBuffer(), page->GetLength(), TEXT_BOLD_ON));
+  }
+}
+
+int BlockParagraphLinefeeds(const char *tag, unsigned char spacing) {
+  TestCtx tc;
+  tc.paragraph_spacing = spacing;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  const std::string html = std::string("<html><body><") + tag +
+      "><p>FIRST</p><p>SECOND</p></" + tag + "></body></html>";
+  ExpectTrue("block paragraph XML parses", xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  const std::string visible = ExtractVisibleAsciiFromPages(book);
+  ExpectTrue("both block paragraphs remain readable", visible.find("FIRST") != std::string::npos && visible.find("SECOND") != std::string::npos);
+  int linefeeds = 0;
+  for (int i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    linefeeds += CountBufValue(page->GetBuffer(), page->GetLength(), '\n');
+  }
+  ExpectTrue("block paragraphs remain separate lines", linefeeds > 0);
+  return linefeeds;
+}
+
+void TestTightBlocksSuppressUserParagraphGap() {
+  const char *tight[] = {"blockquote", "dd"};
+  for (size_t i = 0; i < sizeof(tight) / sizeof(tight[0]); ++i) {
+    const int normal = BlockParagraphLinefeeds(tight[i], 0);
+    const int wide = BlockParagraphLinefeeds(tight[i], 3);
+    ExpectIntEq("quote/definition spacing ignores extra reader paragraph gap", wide, normal);
+  }
+  const int aside_normal = BlockParagraphLinefeeds("aside", 0);
+  const int aside_wide = BlockParagraphLinefeeds("aside", 3);
+  ExpectTrue("aside paragraphs retain extra reader paragraph gap", aside_wide > aside_normal);
 }
 
 void TestUserParagraphSpacingSurvivesZeroPublisherMargin() {
@@ -414,8 +475,8 @@ void TestSuppressOnlyDoesNotCrossBlockFontScopeStart() {
   xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
 
   // <p> with margin:0 followed by a font-size:200% div whose first <p> has
-  // margin-top:0.5em. Without the fix the inner paragraph receives an extra
-  // blank line from was_suppressed injection; with the fix there is none.
+  // margin-top:0.5em. The positive margin contributes one blank line; a
+  // stale suppress-only flag must not add another across the font scope.
   // Using inline styles because the test does not populate a CSS class map.
   const std::string html =
       "<html><body>"
@@ -430,11 +491,10 @@ void TestSuppressOnlyDoesNotCrossBlockFontScopeStart() {
 
   const u32 *buf = book.GetPage(0)->GetBuffer();
   const int len = book.GetPage(0)->GetLength();
-  // Exactly one block boundary newline before "Inner text" (from
-  // EnsureBlockBoundaryBeforeBlockStart). A second newline would indicate
-  // the spurious blank line from was_suppressed injection.
+  // One block boundary newline plus one blank line for the explicit margin.
+  // Any further newline would indicate stale spacing from the outer scope.
   ExpectTrue("suppress-font-scope: no extra blank line before inner paragraph",
-             CountBufValue(buf, len, '\n') == 1);
+             CountBufValue(buf, len, '\n') == 2);
 }
 
 void TestCssSpacingNearBottomAdvancesScreen() {
@@ -1090,6 +1150,39 @@ void TestImageOnlyParagraphKeepsExplicitBottomMargin() {
   ResetBookInlineImageStubState();
 }
 
+void TestPublisherMarginsAreIndependent() {
+  for (bool vertical : {false, true}) {
+    for (bool horizontal : {false, true}) {
+      for (bool per_book : {false, true}) {
+        TestCtx tc;
+        tc.paragraph_spacing = 0;
+        tc.publisher_block_margins = per_book ? !vertical : vertical;
+        tc.publisher_horizontal_margins = per_book ? !horizontal : horizontal;
+        Book book(tc.ctx);
+        if (per_book) {
+          book.SetStylePublisherBlockMarginsOverride(vertical ? 1 : 0);
+          book.SetStylePublisherHorizontalMarginsOverride(horizontal ? 1 : 0);
+        }
+        parsedata_t p = MakeParseData(tc, book);
+        p.linebegan = true;
+        const char *attr[] = {
+            "style", "margin-left:48px;margin-right:24px;margin-top:48px",
+            nullptr};
+        epub_css_class_map::CssClassMargins elem_css{};
+        bool early = false;
+        book_xml_block_handler::HandleBlockElementStart(
+            &p, &tc.text, "blockquote", attr, elem_css, "", &early);
+        ExpectIntEq("publisher left margin follows side setting",
+                    parse_current_block_margin_left(&p), horizontal ? 48 : 0);
+        ExpectIntEq("publisher right margin follows side setting",
+                    parse_current_block_margin_right(&p), horizontal ? 24 : 0);
+        ExpectTrue("publisher vertical spacing is independent of sides",
+                   (p.pending_block_spacing_lf > 0) == vertical);
+      }
+    }
+  }
+}
+
 void TestPageBreakBeforeAlwaysUsesHardBreak() {
   TestCtx tc;
   tc.paragraph_spacing = 0;
@@ -1383,10 +1476,21 @@ void TestSmallFontParagraphsRenderWithoutDroppedLines() {
 
 } // namespace
 
+#include "xml_page_rendering_cases.h"
+
 int main() {
+  TestEmbeddedCssParagraphSpacing();
+  TestAdjacentDivsStartSeparateLines();
+  TestAdjacentDivsAfterBandImageStartSeparateLines();
+  TestEmbeddedCssAlignedLines();
+  TestXmlAlignedLines();
+  TestXmlPageRenderingContinuity();
+  TestHrAtPageEdgeKeepsFollowingHeading();
   TestRubyAnnotationEmitsBrackets();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
+  TestSemanticPageBreakVisibility();
+  TestTightBlocksSuppressUserParagraphGap();
   TestUserParagraphSpacingAddsExtraBlankLines();
   TestUserParagraphSpacingSurvivesZeroPublisherMargin();
   TestBlockIndentSurvivesPageOverflow();
@@ -1406,6 +1510,7 @@ int main() {
   TestBandImageSeparatorSequenceMatchesRenderedHeight();
   TestBodyTextIndentIsInheritedAndClassZeroOverrides();
   TestImageOnlyParagraphKeepsExplicitBottomMargin();
+  TestPublisherMarginsAreIndependent();
   TestPageBreakBeforeAlwaysUsesHardBreak();
   TestLargeFontPaginationDoesNotDropTextAcrossPages();
   TestSmallFontParagraphsRenderWithoutDroppedLines();

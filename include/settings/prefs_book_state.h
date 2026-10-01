@@ -13,6 +13,7 @@ struct SavedBookState {
   int style_paragraph_spacing;
   int style_publisher_text_indent;
   int style_publisher_block_margins;
+  int style_publisher_horizontal_margins;
   uint32_t last_opened;
   // For the library while the book is closed: its page count and reading
   // pace (ms per page) when it was last open. 0 = unknown.
@@ -24,7 +25,8 @@ struct SavedBookState {
       : position(0), mobi_line_wrap_fix(false), style_font_size(-1),
         style_line_spacing(-1), style_paragraph_spacing(-1),
         style_publisher_text_indent(-1), style_publisher_block_margins(-1),
-        last_opened(0), page_count(0), ms_per_page(0), bookmarks() {}
+        style_publisher_horizontal_margins(-1), last_opened(0), page_count(0),
+        ms_per_page(0), bookmarks() {}
 };
 
 typedef std::unordered_map<std::string, SavedBookState> SavedBookStateMap;

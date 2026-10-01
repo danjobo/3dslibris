@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 /*
     3dslibris - app.cpp
     Adapted from dslibris for Nintendo 3DS.
@@ -117,6 +118,7 @@ App::App()
   paraindent = 0;
   publisher_text_indent = true;
   publisher_block_margins = true;
+  publisher_horizontal_margins = true;
   colorMode = 0;
 
   // Default key mappings
@@ -282,15 +284,29 @@ bool App::PresentIfDirty()
 {
   if (lifecycle_state_.IsSuspended())
     return false;
+  const bool measure_present = fixed_perf::NeedsPresentationTiming();
+  uint64_t perf_phase = measure_present ? fixed_perf::Now() : 0;
   const bool had_dirty = ts->HasDirtyScreens();
   const bool wrote = ts->BlitToFramebuffer();
+  if (measure_present)
+    fixed_perf::ViewStage("present.framebuffer_copy",
+                          fixed_perf::Now() - perf_phase, wrote ? 1 : 0);
   const bool browser_idle_copy = (nav_.mode == AppMode::Browser && !had_dirty && wrote);
   if (browser_idle_copy)
     return false;
   if (wrote)
   {
+    if (measure_present)
+      perf_phase = fixed_perf::Now();
     gfxFlushBuffers();
+    if (measure_present) {
+      fixed_perf::ViewStage("present.flush", fixed_perf::Now() - perf_phase);
+      perf_phase = fixed_perf::Now();
+    }
     gfxSwapBuffers();
+    if (measure_present)
+      fixed_perf::ViewStage("present.swap", fixed_perf::Now() - perf_phase);
+    fixed_perf::Presented();
     return true;
   }
   return false;

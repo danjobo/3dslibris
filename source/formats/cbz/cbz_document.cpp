@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 #include "formats/cbz/cbz_document.h"
 
 #include "book/book.h"
@@ -149,9 +150,14 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
   if (!book || !path)
     return 255;
 
+  const uint64_t perf_open_start = fixed_perf::Now();
   std::vector<CbzPageEntry> entries;
-  if (!IndexCbzEntriesWithLog(book, path, &entries, "open"))
+  if (!IndexCbzEntriesWithLog(book, path, &entries, "open")) {
+    fixed_perf::Document(book, "CBZ_OPEN", path);
+    fixed_perf::Record(book, -1, -1, "cbz.index_zip", fixed_perf::Now()-perf_open_start, 0);
     return BOOK_ERR_CORRUPT;
+  }
+  const uint64_t perf_index_us = fixed_perf::Now()-perf_open_start;
 
   book->ClearChapters();
   book->ClearTocConfidence();
@@ -166,6 +172,9 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
   }
 #endif
 
+  fixed_perf::Document(book, "CBZ_OPEN", path);
+  fixed_perf::Record(book, -1, -1, "cbz.index_zip", perf_index_us, 1);
+  fixed_perf::Record(book, -1, -1, "cbz.open_total", fixed_perf::Now()-perf_open_start, 1);
   return 0;
 }
 

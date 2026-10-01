@@ -132,6 +132,7 @@ public:
   u8 paraspacing, paraindent;
   bool publisher_text_indent;
   bool publisher_block_margins;
+  bool publisher_horizontal_margins;
 
   Button prefsButtons[PREFS_BUTTON_COUNT];
 

@@ -55,44 +55,58 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
     return;
   }
 
-  const int draw_width_denom = std::max(1, draw_width);
-  const int draw_height_denom = std::max(1, draw_height);
+  const int col0 = std::max(0, -x);
+  const int col1 = std::min(draw_width, logical_width - x);
+  const int row0 = std::max(0, -y);
+  const int row1 = std::min(draw_height, logical_height - y);
+  if (col0 >= col1 || row0 >= row1)
+    return;
 
-  for (int row = 0; row < draw_height; row++) {
-    const int dy = y + row;
-    if (dy < 0 || dy >= logical_height)
+  struct ColumnSample {
+    int x0, x1;
+    float t;
+  };
+  // Only visible columns are retained, even when a zoomed page is very wide.
+  std::vector<ColumnSample> columns((size_t)(col1 - col0));
+  for (int col = col0; col < col1; col++) {
+    ColumnSample &sample = columns[(size_t)(col - col0)];
+    if (!high_quality_filter) {
+      sample.x0 = crop_x + ((col * crop_width) / draw_width);
       continue;
-    for (int col = 0; col < draw_width; col++) {
-      const int dx = x + col;
-      if (dx < 0 || dx >= logical_width)
-        continue;
+    }
+    const float src_xf = (float)crop_x +
+        (((float)col + 0.5f) * (float)crop_width / (float)draw_width) - 0.5f;
+    const float clamped_x = std::max((float)crop_x,
+        std::min((float)(crop_x + crop_width - 1), src_xf));
+    sample.x0 = (int)clamped_x;
+    sample.x1 = std::min(crop_x + crop_width - 1, sample.x0 + 1);
+    sample.t = clamped_x - (float)sample.x0;
+  }
 
-      if (!high_quality_filter) {
-        const int src_x = crop_x + ((col * crop_width) / draw_width_denom);
-        const int src_y = crop_y + ((row * crop_height) / draw_height_denom);
-        screen[(size_t)dy * (size_t)stride + (size_t)dx] =
-            pixels[(size_t)src_y * (size_t)src_width + (size_t)src_x];
-        continue;
+  for (int row = row0; row < row1; row++) {
+    const int dy = y + row;
+    if (!high_quality_filter) {
+      const int src_y = crop_y + ((row * crop_height) / draw_height);
+      for (int col = col0; col < col1; col++) {
+        screen[(size_t)dy * (size_t)stride + (size_t)(x + col)] =
+            pixels[(size_t)src_y * (size_t)src_width +
+                   (size_t)columns[(size_t)(col - col0)].x0];
       }
-
-      const float src_xf =
-          (float)crop_x +
-          (((float)col + 0.5f) * (float)crop_width / (float)draw_width) - 0.5f;
-      const float src_yf =
-          (float)crop_y +
-          (((float)row + 0.5f) * (float)crop_height / (float)draw_height) - 0.5f;
-      const float clamped_x =
-          std::max((float)crop_x,
-                   std::min((float)(crop_x + crop_width - 1), src_xf));
-      const float clamped_y =
-          std::max((float)crop_y,
-                   std::min((float)(crop_y + crop_height - 1), src_yf));
-      const int x0 = (int)clamped_x;
-      const int y0 = (int)clamped_y;
-      const int x1 = std::min(crop_x + crop_width - 1, x0 + 1);
-      const int y1 = std::min(crop_y + crop_height - 1, y0 + 1);
-      const float tx = clamped_x - (float)x0;
-      const float ty = clamped_y - (float)y0;
+      continue;
+    }
+    const float src_yf = (float)crop_y +
+        (((float)row + 0.5f) * (float)crop_height / (float)draw_height) - 0.5f;
+    const float clamped_y = std::max((float)crop_y,
+        std::min((float)(crop_y + crop_height - 1), src_yf));
+    const int y0 = (int)clamped_y;
+    const int y1 = std::min(crop_y + crop_height - 1, y0 + 1);
+    const float ty = clamped_y - (float)y0;
+    for (int col = col0; col < col1; col++) {
+      const int dx = x + col;
+      const ColumnSample &sample = columns[(size_t)(col - col0)];
+      const int x0 = sample.x0;
+      const int x1 = sample.x1;
+      const float tx = sample.t;
 
       int r00 = 0, g00 = 0, b00 = 0;
       int r10 = 0, g10 = 0, b10 = 0;

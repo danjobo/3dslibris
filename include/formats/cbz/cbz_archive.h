@@ -21,3 +21,20 @@ bool ReadCbzArchiveEntryBytes(const std::string &archive_path,
 bool ReadComicInfoBookmarks(const std::string &archive_path,
                             std::vector<CbzComicInfoBookmark> *out);
 const char *GetLastCbzArchiveError();
+
+// One reader per owner/thread. Entries are closed after each read; the archive
+// remains open until Close(), an error, or destruction. Never share its cursor.
+class CbzArchiveReader {
+public:
+  CbzArchiveReader();
+  ~CbzArchiveReader();
+  void Close();
+  bool Read(const std::string &archive_path, const CbzPageEntry &entry,
+            std::vector<unsigned char> *out, size_t max_bytes);
+
+private:
+  void *archive_;
+  std::string path_;
+  CbzArchiveReader(const CbzArchiveReader &);
+  CbzArchiveReader &operator=(const CbzArchiveReader &);
+};

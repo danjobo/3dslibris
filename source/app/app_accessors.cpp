@@ -22,7 +22,11 @@ bool App::IsFontMode(AppMode mode)
 
 AppMode App::GetMode() const { return nav_.mode; }
 
-void App::SetMode(AppMode mode) { nav_.mode = mode; }
+void App::SetMode(AppMode mode) {
+  if (mode == AppMode::Browser && nav_.mode != AppMode::Browser && ts)
+    ts->MarkScreenDirty(ts->screenleft);
+  nav_.mode = mode;
+}
 
 Book *App::GetSelectedBook() const { return nav_.browser.selected_book; }
 

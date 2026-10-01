@@ -3,6 +3,7 @@
 #include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/color_utils.h"
+#include "shared/fixed_layout_perf.h"
 #include "shared/stb_image_gif_utils.h"
 
 #include "stb_image.h"
@@ -203,7 +204,10 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
   fz_var(image);
   fz_var(pixmap);
 
+  const uint64_t context_start = fixed_perf::Now();
   ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, FZ_STORE_DEFAULT);
+  fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_context",
+                     fixed_perf::Now() - context_start, ctx ? 1 : 0);
   if (!ctx) {
     ClearDecodedPage(out);
     SetLastCbzDecodeError("fz_new_context failed");
@@ -211,12 +215,18 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
   }
 
   fz_try(ctx) {
+    const uint64_t buffer_start = fixed_perf::Now();
     buffer = fz_new_buffer_from_copied_data(ctx, bytes.data(), bytes.size());
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_buffer",
+                       fixed_perf::Now() - buffer_start, 1, bytes.size());
+    const uint64_t header_start = fixed_perf::Now();
     image = fz_new_image_from_buffer(ctx, buffer);
 
     if (!image || image->w <= 0 || image->h <= 0)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid image dimensions");
 
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_header",
+                       fixed_perf::Now() - header_start, 1, 0, image->w, image->h);
     out->original_width = image->w;
     out->original_height = image->h;
 
@@ -224,19 +234,29 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
         ComputeDecodeTargetSize(image->w, image->h, max_zoom_index,
                                 target_width, target_height);
 
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_target", 0, 1,
+                       0, target.width, target.height);
     int l2factor = 0;
     while ((image->w >> (l2factor + 1)) >= target.width + 2 &&
            (image->h >> (l2factor + 1)) >= target.height + 2 && l2factor < 6) {
       l2factor++;
     }
 
+    const uint64_t pixmap_start = fixed_perf::Now();
     pixmap = image->get_pixmap(ctx, image, NULL, target.width, target.height,
                                &l2factor);
     if (!pixmap)
       fz_throw(ctx, FZ_ERROR_FORMAT, "image->get_pixmap failed");
 
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_pixmap",
+                       fixed_perf::Now() - pixmap_start, 1, 0,
+                       fz_pixmap_width(ctx, pixmap), fz_pixmap_height(ctx, pixmap));
+    const uint64_t subsample_start = fixed_perf::Now();
     if (l2factor > 0)
       fz_subsample_pixmap(ctx, pixmap, l2factor);
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_subsample",
+                       fixed_perf::Now() - subsample_start, 1, 0,
+                       fz_pixmap_width(ctx, pixmap), fz_pixmap_height(ctx, pixmap));
 
     const int pix_w = fz_pixmap_width(ctx, pixmap);
     const int pix_h = fz_pixmap_height(ctx, pixmap);
@@ -247,6 +267,7 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
     if (!samples || pix_w <= 0 || pix_h <= 0 || stride <= 0 || comps < 1)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid mupdf image pixmap");
 
+    const uint64_t rgb_start = fixed_perf::Now();
     out->source_bitmap.width = pix_w;
     out->source_bitmap.height = pix_h;
     out->source_bitmap.pixels.resize((size_t)pix_w * (size_t)pix_h);
@@ -271,6 +292,10 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
       }
     }
 
+    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_rgb565",
+                       fixed_perf::Now() - rgb_start, 1,
+                       out->source_bitmap.pixels.size() * sizeof(uint16_t),
+                       pix_w, pix_h);
     ok = true;
   }
   fz_catch(ctx) {
@@ -279,10 +304,13 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
     ok = false;
   }
 
+  const uint64_t release_start = fixed_perf::Now();
   fz_drop_pixmap(ctx, pixmap);
   fz_drop_image(ctx, image);
   fz_drop_buffer(ctx, buffer);
   fz_drop_context(ctx);
+  fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_release",
+                     fixed_perf::Now() - release_start, ok ? 1 : 0);
 
   return ok;
 }
@@ -309,34 +337,48 @@ bool ScaleCbzBitmap(const CbzBitmap &src, int dst_width, int dst_height,
   out->height = dst_height;
   out->pixels.assign((size_t)dst_width * (size_t)dst_height, 0);
 
+  if (!high_quality) {
+    // Compute each column once instead of dividing for every pixel on ARM11.
+    // The temporary table costs four bytes per output column, not per pixel.
+    std::vector<int> source_x((size_t)dst_width);
+    for (int x = 0; x < dst_width; x++)
+      source_x[x] = (x * src.width) / dst_width;
+    for (int y = 0; y < dst_height; y++) {
+      const int src_y = (y * src.height) / dst_height;
+      const uint16_t *row = &src.pixels[(size_t)src_y * src.width];
+      uint16_t *dst = &out->pixels[(size_t)y * dst_width];
+      for (int x = 0; x < dst_width; x++)
+        dst[x] = row[source_x[x]];
+    }
+    return true;
+  }
+
+  struct ColumnSample {
+    int x0, x1;
+    float t;
+  };
+  std::vector<ColumnSample> columns((size_t)dst_width);
+  for (int x = 0; x < dst_width; x++) {
+    const float src_xf =
+        (((float)x + 0.5f) * (float)src.width / (float)dst_width) - 0.5f;
+    const float clamped_x =
+        std::max(0.0f, std::min((float)(src.width - 1), src_xf));
+    columns[x].x0 = (int)clamped_x;
+    columns[x].x1 = std::min(src.width - 1, columns[x].x0 + 1);
+    columns[x].t = clamped_x - (float)columns[x].x0;
+  }
   for (int y = 0; y < dst_height; y++) {
+    const float src_yf =
+        (((float)y + 0.5f) * (float)src.height / (float)dst_height) - 0.5f;
+    const float clamped_y =
+        std::max(0.0f, std::min((float)(src.height - 1), src_yf));
+    const int y0 = (int)clamped_y;
+    const int y1 = std::min(src.height - 1, y0 + 1);
+    const float ty = clamped_y - (float)y0;
     for (int x = 0; x < dst_width; x++) {
-      if (!high_quality) {
-        const int src_x =
-            std::min(src.width - 1, (x * src.width) / std::max(1, dst_width));
-        const int src_y = std::min(src.height - 1,
-                                   (y * src.height) / std::max(1, dst_height));
-
-        out->pixels[(size_t)y * (size_t)dst_width + (size_t)x] =
-            src.pixels[(size_t)src_y * (size_t)src.width + (size_t)src_x];
-        continue;
-      }
-
-      const float src_xf =
-          (((float)x + 0.5f) * (float)src.width / (float)dst_width) - 0.5f;
-      const float src_yf =
-          (((float)y + 0.5f) * (float)src.height / (float)dst_height) - 0.5f;
-      const float clamped_x =
-          std::max(0.0f, std::min((float)(src.width - 1), src_xf));
-      const float clamped_y =
-          std::max(0.0f, std::min((float)(src.height - 1), src_yf));
-
-      const int x0 = (int)clamped_x;
-      const int y0 = (int)clamped_y;
-      const int x1 = std::min(src.width - 1, x0 + 1);
-      const int y1 = std::min(src.height - 1, y0 + 1);
-      const float tx = clamped_x - (float)x0;
-      const float ty = clamped_y - (float)y0;
+      const int x0 = columns[x].x0;
+      const int x1 = columns[x].x1;
+      const float tx = columns[x].t;
 
       int r00 = 0, g00 = 0, b00 = 0;
       int r10 = 0, g10 = 0, b10 = 0;

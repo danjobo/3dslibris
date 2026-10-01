@@ -44,10 +44,6 @@ bool DetectNew3ds() {
   return is_new_3ds;
 }
 
-u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
-  return (u16)(((u16)(r >> 3) << 11) | ((u16)(g >> 2) << 5) | (u16)(b >> 3));
-}
-
 void RGB565ToRgb8(u16 pixel, int *r, int *g, int *b) {
   if (!r || !g || !b)
     return;

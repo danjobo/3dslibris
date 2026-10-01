@@ -24,11 +24,16 @@ void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
 #include "ui/gradient_utils.h"
 #include "book/book_context.h"
 #include "shared/debug_log.h"
+
 #include "shared/cover_decode_utils.h"
 #include "formats/common/file_read_utils.h"
 #include "shared/path_constants.h"
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
+
+#ifndef RECENT_BOOKS_TRACE
+#define RECENT_BOOKS_TRACE 0
+#endif
 
 #ifndef UTF8_FILENAME_DIAG
 #define UTF8_FILENAME_DIAG 0
@@ -367,6 +372,7 @@ static Book *NewLibraryBook(App *app, LibraryGradientContext *gradient_ctx,
   ctx.paragraph_indent = &app->paraindent;
   ctx.publisher_text_indent = &app->publisher_text_indent;
   ctx.publisher_block_margins = &app->publisher_block_margins;
+  ctx.publisher_horizontal_margins = &app->publisher_horizontal_margins;
   ctx.orientation = &app->orientation;
   ctx.status_reporter = app;
   ctx.draw_background = &DrawBottomGradientFromApp;
@@ -437,6 +443,7 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   ctx.paragraph_indent = &app->paraindent;
   ctx.publisher_text_indent = &app->publisher_text_indent;
   ctx.publisher_block_margins = &app->publisher_block_margins;
+  ctx.publisher_horizontal_margins = &app->publisher_horizontal_margins;
   ctx.orientation = &app->orientation;
   ctx.status_reporter = app;
   ctx.draw_background = &DrawBottomGradientFromApp;
@@ -710,11 +717,13 @@ void LibraryController::SortBooks() {
     std::sort(app_.books.begin(), app_.books.end(), &BookDateModifiedLessThan);
     break;
   case LIBRARY_SORT_RECENT:
+#if RECENT_BOOKS_TRACE
     for (auto &book : app_.books) {
       DBG_LOGF(&app_, "recently-opened: pre-sort t=%lu \"%s\"",
                (unsigned long)book->GetLastOpenedTime(),
                book->GetFileName() ? book->GetFileName() : "?");
     }
+#endif
     std::sort(app_.books.begin(), app_.books.end(), &BookRecentLessThan);
     break;
   default:

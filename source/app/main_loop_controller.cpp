@@ -1,3 +1,4 @@
+#include "shared/fixed_layout_perf.h"
 /*
     3dslibris - main_loop_controller.cpp
     Adapted from dslibris for Nintendo 3DS.
@@ -23,12 +24,15 @@
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
 #include "shared/page_timing.h"
+#include "settings/prefs.h"
 
 MainLoopController::MainLoopController(App &app) : app_(app) {}
 
 int MainLoopController::RunMainLoop()
 {
 #ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_, "PERF schema=1 new3ds=%d homebrew=%d units=us pages=1-based memory=bytes",
+           app_.IsNew3dsDevice() ? 1 : 0, app_.IsHomebrewEnvironment() ? 1 : 0);
   AppMode last_mode = app_.GetMode();
   int mode_log_budget = 64;
   int heap_log_countdown = 0;
@@ -67,6 +71,8 @@ int MainLoopController::RunMainLoop()
 
   while (aptMainLoop())
   {
+    if (app_.GetMode() != AppMode::Book)
+      fixed_perf::ResetView();
     if (app_.GetMode() == AppMode::Quit)
     {
       app_.PersistPrefs();
@@ -140,19 +146,6 @@ int MainLoopController::RunMainLoop()
       boot_trace::Boot("main pending boot reopen done");
     }
 
-    // Allow browser warmup jobs to run during idle periods in the browser, based on timing and input state.
-    if (app_.GetMode() == AppMode::Browser)
-    {
-      if (!debug_runtime::BrowserWarmupDisabled())
-      {
-        bool allow_jobs = browser_warmup_utils::IsBrowserWarmupIdle(
-            osGetTime(), app_.GetBrowserLastInteractionMs(),
-            app_.IsBrowserWaitingInputRelease());
-        if (allow_jobs)
-          app_.ProcessJobs(3); // Process background jobs with a small time budget during idle periods to warm up the browser without impacting responsiveness.
-      }
-    }
-
 #ifdef DSLIBRIS_DEBUG
     if (mode_log_budget > 0 && app_.GetMode() != last_mode)
     {
@@ -164,6 +157,10 @@ int MainLoopController::RunMainLoop()
     }
 #endif
     // Dispatch frame processing based on the current app mode, handling input and updates for each mode. After processing, present the frame if it was marked dirty.
+    const AppMode input_mode = app_.GetMode();
+#ifdef DSLIBRIS_DEBUG
+    const uint64_t input_started_ms = osGetTime();
+#endif
     switch (app_.GetMode())
     {
     case AppMode::Book:
@@ -314,7 +311,32 @@ int MainLoopController::RunMainLoop()
       }
     }
 #endif
+#ifdef DSLIBRIS_DEBUG
+    const uint64_t input_elapsed_ms = osGetTime() - input_started_ms;
+    if (input_elapsed_ms >= 32)
+      DBG_LOGF(&app_, "TIMING: ui_frame mode=%d ms=%llu keys=%lu held=%lu",
+               (int)input_mode, (unsigned long long)input_elapsed_ms,
+               (unsigned long)input.keys_down, (unsigned long)input.keys_held);
+#endif
+
+    // Present the input response before SD writes or non-preemptible jobs.
+    const bool leaving_prefs = input_mode == AppMode::Prefs &&
+                              app_.GetMode() != AppMode::Prefs;
+    bool wrote_prefs = false;
+    if (!app_.IsAppletSuspended() && aptIsActive() &&
+        (leaving_prefs || (input.keys_down == 0 && input.keys_held == 0)))
+      wrote_prefs = app_.prefs->FlushPendingWrite(leaving_prefs);
+    if (!wrote_prefs && app_.GetMode() == AppMode::Browser &&
+        input.keys_down == 0 && input.keys_held == 0 &&
+        !debug_runtime::BrowserWarmupDisabled() &&
+        !app_.IsAppletSuspended() && aptIsActive() &&
+        browser_warmup_utils::IsBrowserWarmupIdle(
+            osGetTime(), app_.GetBrowserLastInteractionMs(),
+            app_.IsBrowserWaitingInputRelease()))
+      app_.ProcessJobs(3);
+    fixed_perf::Flush(&app_);
   }
+  fixed_perf::Flush(&app_);
   app_.PersistPrefs();
   return 0;
 }

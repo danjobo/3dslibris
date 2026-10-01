@@ -41,6 +41,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_limits.h"
 #include "formats/epub/epub_package_toc_utils.h"
 #include "formats/epub/epub_zip_utils.h"
+#include "formats/epub/epub_stylesheet_utils.h"
 #include "parse.h"
 #include "shared/path_utils.h"
 #include "shared/parser_limits.h"
@@ -107,66 +108,8 @@ using epub_package_toc_utils::ReadZipEntryText;
 
 namespace {
 
-// Returns hrefs of all CSS stylesheets linked in xhtml_text.
-// Skips <link> tags whose type= is present but not "text/css"
-// (e.g. Adobe page-template.xpgt uses a vendor MIME type).
-std::vector<std::string> ExtractLinkStylesheetHrefs(const std::string &xhtml_text) {
-  std::vector<std::string> result;
-  const char *s = xhtml_text.c_str();
-  size_t len = xhtml_text.size();
-  size_t i = 0;
-  while (i < len) {
-    const char *link_tag = strstr(s + i, "<link");
-    if (!link_tag)
-      break;
-    size_t tag_pos = (size_t)(link_tag - s);
-    const char *tag_end = strchr(link_tag, '>');
-    if (!tag_end)
-      break;
-    std::string tag(link_tag, (size_t)(tag_end - link_tag + 1));
-    std::string tag_lc = ToLowerAscii(tag);
-    if (tag_lc.find("rel=\"stylesheet\"") != std::string::npos ||
-        tag_lc.find("rel='stylesheet'") != std::string::npos) {
-      bool is_css = true;
-      size_t type_pos = tag_lc.find("type=");
-      if (type_pos != std::string::npos) {
-        type_pos += 5;
-        if (type_pos < tag_lc.size()) {
-          char tq = tag_lc[type_pos];
-          if (tq == '"' || tq == '\'') {
-            size_t tv_start = type_pos + 1;
-            size_t tv_end = tag_lc.find(tq, tv_start);
-            if (tv_end != std::string::npos)
-              is_css = (tag_lc.substr(tv_start, tv_end - tv_start) == "text/css");
-          }
-        }
-      }
-      if (is_css) {
-        size_t href_pos = tag_lc.find("href=");
-        if (href_pos != std::string::npos) {
-          href_pos += 5;
-          char q = tag[href_pos];
-          if (q == '"' || q == '\'') {
-            size_t val_start = href_pos + 1;
-            size_t val_end = tag.find(q, val_start);
-            if (val_end != std::string::npos) {
-              std::string href = tag.substr(val_start, val_end - val_start);
-              if (!href.empty())
-                result.push_back(href);
-            }
-          }
-        }
-      }
-    }
-    i = tag_pos + 1;
-  }
-  return result;
-}
-
-// Reads an XHTML zip entry in 4KB chunks and returns all CSS stylesheet hrefs
-// found in the <head>. Stops at </head> or after 8KB so only the head section
-// is decompressed. Non-CSS stylesheet types (e.g. .xpgt) are filtered out.
-std::vector<std::string> ScanXhtmlHeadForCssHrefs(unzFile uf,
+// Read a bounded head prefix; both linked and embedded CSS are collected.
+std::vector<epub_stylesheet_utils::Stylesheet> ScanXhtmlHeadForStylesheets(unzFile uf,
                                                    const std::string &xhtml_path,
                                                    IStatusReporter *reporter) {
 #if !EPUB_CSS_TRACE
@@ -190,10 +133,10 @@ std::vector<std::string> ScanXhtmlHeadForCssHrefs(unzFile uf,
     return {};
 
   static const size_t kChunkSize = 4096;
-  static const size_t kMaxScanBytes = 8192;
+  static const size_t kMaxScanBytes = 65536;
   char chunk[kChunkSize];
   std::string buf;
-  buf.reserve(kMaxScanBytes);
+  buf.reserve(kChunkSize);
 
   while (buf.size() < kMaxScanBytes) {
     int n = unzReadCurrentFile(uf, chunk, (unsigned)kChunkSize);
@@ -209,7 +152,12 @@ std::vector<std::string> ScanXhtmlHeadForCssHrefs(unzFile uf,
 #if EPUB_CSS_TRACE
   DBG_LOGF(reporter, "EPUB: CSS-SCAN read ok bytes=%u", (unsigned)buf.size());
 #endif
-  return ExtractLinkStylesheetHrefs(buf);
+  bool head_complete = false;
+  auto sheets = epub_stylesheet_utils::ExtractHeadStylesheets(buf, &head_complete);
+  if (!head_complete)
+    DBG_LOGF(reporter, "EPUB CSS: incomplete head doc=%s bytes=%u",
+             xhtml_path.c_str(), (unsigned)buf.size());
+  return sheets;
 }
 
 void LoadCssClassMapForDoc(const std::string &archive_path,
@@ -227,15 +175,14 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
   if (slash != std::string::npos)
     xhtml_folder = xhtml_path.substr(0, slash);
 
-  // Check the per-doc href cache. An empty vector means "already scanned, no CSS".
+  // Source keys preserve document order; an empty vector means no CSS.
   if (epd) {
-    auto href_it = epd->css_href_by_doc.find(xhtml_path);
-    if (href_it != epd->css_href_by_doc.end()) {
+    auto href_it = epd->css_sources_by_doc.find(xhtml_path);
+    if (href_it != epd->css_sources_by_doc.end()) {
       for (const std::string &css_path : href_it->second) {
         auto css_it = epd->css_class_map_by_path.find(css_path);
         if (css_it != epd->css_class_map_by_path.end()) {
-          for (const auto &kv : css_it->second)
-            (*out)[kv.first] = kv.second;
+          epub_stylesheet_utils::MergeRules(css_it->second, out);
         }
       }
       return;
@@ -249,49 +196,55 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
   if (!scan_uf)
     return;
 
-  std::vector<std::string> css_hrefs =
-      ScanXhtmlHeadForCssHrefs(scan_uf, xhtml_path, reporter);
-
-  // Resolve relative hrefs to full archive paths and deduplicate.
-  std::vector<std::string> css_paths;
-  for (const std::string &href : css_hrefs) {
-    std::string css_path = NormalizePath(xhtml_folder + "/" + href);
-    if (!css_path.empty())
-      css_paths.push_back(css_path);
-  }
-
-  if (epd)
-    epd->css_href_by_doc[xhtml_path] = css_paths;
-
-  for (const std::string &css_path : css_paths) {
-    // Use cached parse result if available.
+  const auto sheets = ScanXhtmlHeadForStylesheets(scan_uf, xhtml_path, reporter);
+  std::vector<std::string> source_keys;
+  unsigned embedded_count = 0;
+  unsigned failed_count = 0;
+  for (size_t i = 0; i < sheets.size(); ++i) {
+    const auto &sheet = sheets[i];
+    const bool embedded = sheet.href.empty();
+    embedded_count += embedded ? 1u : 0u;
+    const std::string css_path = embedded ? std::string() :
+        NormalizePath(xhtml_folder + "/" + sheet.href);
+    // Separate namespaces avoid collisions with real archive paths.
+    const std::string key = embedded ?
+        "inline:" + xhtml_path + ":" + std::to_string(i) : "file:" + css_path;
+    source_keys.push_back(key);
     if (epd) {
-      auto css_it = epd->css_class_map_by_path.find(css_path);
+      auto css_it = epd->css_class_map_by_path.find(key);
       if (css_it != epd->css_class_map_by_path.end()) {
-        for (const auto &kv : css_it->second)
-          (*out)[kv.first] = kv.second;
+        epub_stylesheet_utils::MergeRules(css_it->second, out);
         continue;
       }
     }
 
     std::string css_text;
-    epub_zip_utils::ZipEntryIndex css_index;
-    bool ok =
-        ReadZipEntryText(scan_uf, css_path, css_text,
-                         EPUB_CSS_TRACE ? reporter : NULL, "CSS-LOAD",
-                         &css_index);
-    if (!ok || css_text.empty())
-      continue;
-
+    if (embedded) {
+      css_text = sheet.css;
+    } else {
+      epub_zip_utils::ZipEntryIndex css_index;
+      if (!ReadZipEntryText(scan_uf, css_path, css_text,
+                            EPUB_CSS_TRACE ? reporter : NULL, "CSS-LOAD",
+                            &css_index)) {
+        ++failed_count;
+        DBG_LOGF(reporter, "EPUB CSS: load failed doc=%s sheet=%s",
+                 xhtml_path.c_str(), css_path.c_str());
+        continue;
+      }
+    }
     epub_css_class_map::CssClassMap parsed;
     epub_css_class_map::ParseCssIntoClassMap(css_text.c_str(), css_text.size(),
                                              &parsed);
     if (epd)
-      epd->css_class_map_by_path[css_path] = parsed;
-    for (const auto &kv : parsed)
-      (*out)[kv.first] = kv.second;
+      epd->css_class_map_by_path[key] = parsed;
+    epub_stylesheet_utils::MergeRules(parsed, out);
   }
 
+  if (epd)
+    epd->css_sources_by_doc[xhtml_path] = source_keys;
+  DBG_LOGF(reporter, "EPUB CSS: doc=%s linked=%u embedded=%u failed=%u rules=%u",
+           xhtml_path.c_str(), (unsigned)(sheets.size() - embedded_count),
+           embedded_count, failed_count, (unsigned)out->size());
   if (owns_scan_uf) unzClose(scan_uf);
 }
 
@@ -327,7 +280,7 @@ void epub_data_init(epub_data_t *d) {
   d->tocid = "";
   d->navid = "";
   d->parsed_doc_title = "";
-  d->css_href_by_doc.clear();
+  d->css_sources_by_doc.clear();
   d->css_class_map_by_path.clear();
   d->metadataonly = false;
   d->metadata_parse_complete = false;
@@ -346,7 +299,7 @@ void epub_data_delete(epub_data_t *d) {
   for (auto *ctx : d->ctx)
     delete ctx;
   d->ctx.clear();
-  d->css_href_by_doc.clear();
+  d->css_sources_by_doc.clear();
   d->css_class_map_by_path.clear();
 }
 
@@ -548,6 +501,11 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
   parsedata->book = book;
   parsedata->reporter = deps.reporter;
   parsedata->ts = deps.ts;
+  if (deps.ts) {
+    // Match Page::Draw even when paragraph/style markers start the buffer.
+    parsedata->pen.x = deps.ts->margin.left;
+    parsedata->pen.y = deps.ts->margin.top + deps.ts->GetHeight();
+  }
   parsedata->prefs = deps.prefs;
   parsedata->coalesce_text_segments = true;
 }
@@ -615,6 +573,17 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
                             epd, &pd.css_class_map, css_scan_uf);
+#ifdef DSLIBRIS_DEBUG
+    unsigned align_rules = 0;
+    for (const auto &rule : pd.css_class_map)
+      align_rules += rule.second.has_text_align ? 1u : 0u;
+    DBG_LOGF(deps.reporter,
+             "EPUB layout: doc=%s rules=%u align_rules=%u publisher_spacing=%d publisher_sides=%d font=%d orientation=%d",
+             epd->docpath.c_str(), (unsigned)pd.css_class_map.size(), align_rules,
+             epd->book->GetPublisherBlockMarginsEnabled() ? 1 : 0,
+             epd->book->GetPublisherHorizontalMarginsEnabled() ? 1 : 0,
+             deps.layout.pixel_size, deps.orientation);
+#endif
     {
       epub_css_class_map::FontSizeSpec body_spec;
       if (epub_css_class_map::LookupFontSizeForTag("body", pd.css_class_map,
