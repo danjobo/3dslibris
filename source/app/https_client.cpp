@@ -127,7 +127,12 @@ bool Request(Session &session, const std::string &method,
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body.size());
   } else if (method != "GET") {
+    // PATCH, DELETE, ...: the method name, with the body if there is one.
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
+    if (!body.empty()) {
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+      curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)body.size());
+    }
   }
 
   const CURLcode rc = curl_easy_perform(curl);

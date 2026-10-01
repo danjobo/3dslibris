@@ -45,7 +45,7 @@ Result ExportHighlights(
     row.highlight = h.text;
     row.title = h.title;
     row.author = h.author;
-    row.note = h.note;
+    row.note = readwise_api_utils::NoteWithTag(h.color, h.note);
     row.location = h.location;
     row.date = h.highlighted_at;
     rows.push_back(row);
@@ -82,7 +82,7 @@ Result ExportBooks(const std::vector<Book *> &books) {
       row.highlight = a.quote;
       row.title = title;
       row.author = author;
-      row.note = a.note;
+      row.note = readwise_api_utils::NoteWithTag(a.color, a.note);
       // Current page when the book is open and the text is found; otherwise
       // the page where the highlight was last seen.
       const int page = book->GetAnnotationPage(a.id);

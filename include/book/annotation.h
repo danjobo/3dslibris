@@ -35,10 +35,17 @@ struct Annotation {
   std::string prefix;        // Normalized text just before the quote.
   std::string note;          // Highlights only; optional.
   uint8_t color;             // Highlights only; highlight_color_utils::Color.
+  // Readwise upload state (highlights only), synced so every console
+  // knows: the `modified` value last sent (0 = never) and Readwise's id for
+  // the highlight (0 = not looked up yet). Changing these doesn't change
+  // `modified`.
+  uint32_t readwise_uploaded;
+  uint64_t readwise_id;
 
   Annotation()
       : id(0), kind(kHighlight), created(0), modified(0), deleted(false),
-        page_hint(0), page_count_hint(0), color(0) {}
+        page_hint(0), page_count_hint(0), color(0), readwise_uploaded(0),
+        readwise_id(0) {}
 
   bool IsLiveHighlight() const { return kind == kHighlight && !deleted; }
   bool IsLiveBookmark() const { return kind == kBookmark && !deleted; }

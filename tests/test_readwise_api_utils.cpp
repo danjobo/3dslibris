@@ -50,6 +50,7 @@ void TestBuildJson() {
   Highlight a = Make(1, 10, "First \"quote\"");
   a.author = "Author";
   a.note = "my note";
+  a.color = 1;
   a.location = 12;
   a.highlighted_at = 1790858096u;
   hs.push_back(a);
@@ -60,12 +61,13 @@ void TestBuildJson() {
       "body", json.c_str(),
       "{\"highlights\":["
       "{\"text\":\"First \\\"quote\\\"\",\"title\":\"Book\","
-      "\"author\":\"Author\",\"note\":\"my note\",\"category\":\"books\","
+      "\"author\":\"Author\",\"note\":\".green\\nmy note\","
+      "\"category\":\"books\","
       "\"source_type\":\"3dslibris\",\"location\":12,"
       "\"location_type\":\"page\","
       "\"highlighted_at\":\"2026-10-01T12:34:56+00:00\"},"
-      "{\"text\":\"Second\",\"title\":\"Book\",\"category\":\"books\","
-      "\"source_type\":\"3dslibris\"}"
+      "{\"text\":\"Second\",\"title\":\"Book\",\"note\":\".yellow\","
+      "\"category\":\"books\",\"source_type\":\"3dslibris\"}"
       "]}");
   test::ExpectStrEq("empty",
                     readwise_api_utils::BuildHighlightsJson(
@@ -97,15 +99,28 @@ void TestLogRoundTripAndPending() {
   test::ExpectEq("entries", (int)back.size(), 2);
   test::ExpectEq("value", (int)back.find(0x1234567800000002ULL)->second, 200);
 
+  // Uploaded by an older version (log only): unchanged ones still need
+  // their color tag; edited ones their note too.
   std::vector<Highlight> all;
-  all.push_back(Make(0x1234567800000001ULL, 100, "unchanged"));
-  all.push_back(Make(0x1234567800000002ULL, 250, "note edited"));
+  all.push_back(Make(0x1234567800000001ULL, 100, "old, unchanged"));
+  all.push_back(Make(0x1234567800000002ULL, 250, "old, note edited"));
   all.push_back(Make(0x1234567800000003ULL, 300, "new"));
-  const std::vector<Highlight> pending =
-      readwise_api_utils::Pending(all, back);
-  test::ExpectEq("pending", (int)pending.size(), 2);
-  test::ExpectStrEq("edited", pending[0].text.c_str(), "note edited");
-  test::ExpectStrEq("new", pending[1].text.c_str(), "new");
+  Highlight current = Make(0x1234567800000004ULL, 400, "up to date");
+  current.readwise_uploaded = 400;
+  all.push_back(current);
+  Highlight changed = Make(0x1234567800000005ULL, 500, "edited since");
+  changed.readwise_uploaded = 450;
+  changed.readwise_id = 77;
+  all.push_back(changed);
+  const readwise_api_utils::Work work = readwise_api_utils::Classify(all, back);
+  test::ExpectEq("create", (int)work.create.size(), 1);
+  test::ExpectStrEq("new one", work.create[0].text.c_str(), "new");
+  test::ExpectEq("update", (int)work.update.size(), 3);
+  test::ExpectFalse("tag only", work.update_note[0]);
+  test::ExpectTrue("old with edit", work.update_note[1]);
+  test::ExpectStrEq("edited since", work.update[2].text.c_str(),
+                    "edited since");
+  test::ExpectTrue("edited note", work.update_note[2]);
 
   test::ExpectEq("junk log is empty",
                  (int)readwise_api_utils::ParseLog("nonsense\n1\t2\n").size(),
@@ -116,6 +131,21 @@ void TestLogRoundTripAndPending() {
                      "00000000000000bb\t5\r\n")
                      .size(),
                  1);
+}
+
+void TestTagsAndUpdates() {
+  test::ExpectStrEq("tag only", readwise_api_utils::NoteWithTag(0, "").c_str(),
+                    ".yellow");
+  test::ExpectStrEq("tag and note",
+                    readwise_api_utils::NoteWithTag(4, "Big idea").c_str(),
+                    ".purple\nBig idea");
+  test::ExpectStrEq("patch",
+                    readwise_api_utils::PatchNoteJson("a \"b\"").c_str(),
+                    "{\"note\":\"a \\\"b\\\"\"}");
+  test::ExpectStrEq("tag json", readwise_api_utils::TagJson("blue").c_str(),
+                    "{\"name\":\"blue\"}");
+  test::ExpectTrue("same text", readwise_api_utils::SameText(" x y\n", "x y"));
+  test::ExpectFalse("different", readwise_api_utils::SameText("x y", "x z"));
 }
 
 void TestCleanToken() {
@@ -134,6 +164,7 @@ int main() {
   TestBuildJson();
   TestTruncatesLongFields();
   TestLogRoundTripAndPending();
+  TestTagsAndUpdates();
   TestCleanToken();
   return 0;
 }

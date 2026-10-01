@@ -221,6 +221,57 @@ void TestManifestRoundTrip() {
 
 } // namespace
 
+void TestUploadStateIsShared() {
+  // A uploaded the highlight; B has the same version but doesn't know.
+  Annotation a = Highlight(0xA, 1, 100, "quote", "note");
+  a.readwise_uploaded = 100;
+  a.readwise_id = 555;
+  Annotation b = a;
+  b.readwise_uploaded = 0;
+  b.readwise_id = 0;
+  BookState sa, sb;
+  sa.records.push_back(a);
+  sb.records.push_back(b);
+  sync_merge::MergeStats stats_b;
+  const BookState on_b = sync_merge::Merge(sb, sa, &stats_b);
+  test::ExpectEq("b learns the upload", (int)on_b.records[0].readwise_uploaded,
+                 100);
+  test::ExpectTrue("b learns the readwise id", on_b.records[0].readwise_id == 555);
+  test::ExpectTrue("counts as a change", stats_b.Changed());
+  test::ExpectEq("not shown as an edit", stats_b.records_updated, 0);
+  sync_merge::MergeStats stats_a;
+  const BookState on_a = sync_merge::Merge(sa, sb, &stats_a);
+  test::ExpectFalse("a has nothing new", stats_a.Changed());
+  test::ExpectEq("a keeps its upload", (int)on_a.records[0].readwise_uploaded, 100);
+
+  // B then edits the note: the edit wins, the upload state stays known
+  // (so B's next upload updates the Readwise highlight with id 555).
+  Annotation edited = b;
+  edited.modified = 200;
+  edited.note = "new note";
+  BookState sb2;
+  sb2.records.push_back(edited);
+  const BookState merged = sync_merge::Merge(sa, sb2, NULL);
+  test::ExpectStrEq("edit wins", merged.records[0].note.c_str(), "new note");
+  test::ExpectEq("upload version kept", (int)merged.records[0].readwise_uploaded,
+                 100);
+  test::ExpectTrue("id kept", merged.records[0].readwise_id == 555);
+}
+
+void TestColorChangeIsAnEdit() {
+  Annotation a = Highlight(0xA, 1, 100, "quote", "");
+  Annotation b = a;
+  b.color = 3;
+  b.modified = 150;
+  BookState sa, sb;
+  sa.records.push_back(a);
+  sb.records.push_back(b);
+  sync_merge::MergeStats stats;
+  const BookState merged = sync_merge::Merge(sa, sb, &stats);
+  test::ExpectEq("newer color wins", (int)merged.records[0].color, 3);
+  test::ExpectEq("counted", stats.records_updated, 1);
+}
+
 int main() {
   TestDivergedConsolesConverge();
   TestNewerDeletionWins();
@@ -228,5 +279,7 @@ int main() {
   TestProgressMostRecentWins();
   TestRandomEditsConverge();
   TestManifestRoundTrip();
+  TestUploadStateIsShared();
+  TestColorChangeIsAnEdit();
   return 0;
 }

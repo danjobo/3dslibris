@@ -25,13 +25,30 @@ bool Prefer(const Annotation &a, const Annotation &b) {
     return b.prefix > a.prefix;
   if (a.page_hint != b.page_hint)
     return b.page_hint > a.page_hint;
+  if (a.color != b.color)
+    return b.color > a.color;
   return false;
 }
 
 bool SameContent(const Annotation &a, const Annotation &b) {
   return a.kind == b.kind && a.modified == b.modified &&
          a.deleted == b.deleted && a.note == b.note && a.quote == b.quote &&
-         a.prefix == b.prefix;
+         a.prefix == b.prefix && a.color == b.color;
+}
+
+// Upload state from either version: the later upload, and any known id
+// (the one that goes with the later upload if both know one).
+void CombineUploadState(const Annotation &a, const Annotation &b,
+                        Annotation *out) {
+  const Annotation &later =
+      b.readwise_uploaded > a.readwise_uploaded ||
+              (b.readwise_uploaded == a.readwise_uploaded &&
+               b.readwise_id > a.readwise_id)
+          ? b
+          : a;
+  const Annotation &other = &later == &a ? b : a;
+  out->readwise_uploaded = later.readwise_uploaded;
+  out->readwise_id = later.readwise_id ? later.readwise_id : other.readwise_id;
 }
 
 bool PreferProgress(const ReadingProgress &a, const ReadingProgress &b) {
@@ -71,11 +88,18 @@ BookState Merge(const BookState &local, const BookState &remote,
     if (it == by_id.end()) {
       by_id.insert(std::make_pair(r.id, r));
       local_stats.records_added++;
-    } else if (Prefer(it->second, r)) {
-      if (!SameContent(it->second, r))
+      continue;
+    }
+    const Annotation mine = it->second;
+    if (Prefer(mine, r)) {
+      if (!SameContent(mine, r))
         local_stats.records_updated++;
       it->second = r;
     }
+    CombineUploadState(mine, r, &it->second);
+    if (it->second.readwise_uploaded != mine.readwise_uploaded ||
+        it->second.readwise_id != mine.readwise_id)
+      local_stats.uploads_learned++;
   }
   for (std::map<uint64_t, Annotation>::const_iterator it = by_id.begin();
        it != by_id.end(); ++it)

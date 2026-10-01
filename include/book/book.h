@@ -500,6 +500,8 @@ public:
                                     const std::string &note, uint8_t color);
   bool SetAnnotationNote(uint64_t id, const std::string &note);
   bool SetAnnotationColor(uint64_t id, uint8_t color);
+  //! Readwise upload state (not an edit: `modified` stays).
+  bool SetReadwiseState(uint64_t id, uint32_t uploaded, uint64_t readwise_id);
   //! Leaves a tombstone so the deletion syncs.
   bool RemoveAnnotation(uint64_t id);
   //! Page where the highlight currently starts, or -1 if it can't be found.

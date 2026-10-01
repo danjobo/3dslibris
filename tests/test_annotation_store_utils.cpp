@@ -157,8 +157,8 @@ void TestColors() {
   state.records.push_back(green);
   state.records.push_back(purple);
   const std::string text = annotation_store_utils::Serialize(state);
-  test::ExpectTrue("written as v3",
-                   text.compare(0, 21, "3DSLIBRIS-BOOKSTATE 3") == 0);
+  test::ExpectTrue("written as v4",
+                   text.compare(0, 21, "3DSLIBRIS-BOOKSTATE 4") == 0);
   BookState out;
   test::ExpectTrue("parsed",
                    annotation_store_utils::Parse(text, kConsoleA, &out));
@@ -185,6 +185,29 @@ void TestColors() {
                    annotation_store_utils::Parse(future, kConsoleA, &out));
   test::ExpectEq("bad color line skipped", (int)out.records.size(), 1);
   test::ExpectEq("unknown color is yellow", (int)out.records[0].color, 0);
+}
+
+void TestReadwiseFields() {
+  BookState state;
+  Annotation a = MakeHighlight(IdOf(kConsoleA, 7), "sent", "", "note");
+  a.readwise_uploaded = a.modified;
+  a.readwise_id = 0x1234567890ULL;
+  state.records.push_back(a);
+  BookState out;
+  test::ExpectTrue("parsed", annotation_store_utils::Parse(
+                                 annotation_store_utils::Serialize(state),
+                                 kConsoleA, &out));
+  test::ExpectEq("uploaded version", (int)out.records[0].readwise_uploaded,
+                 (int)a.modified);
+  test::ExpectTrue("readwise id", out.records[0].readwise_id == 0x1234567890ULL);
+
+  // v3 records (color, no upload state) load as never uploaded.
+  const std::string v3 =
+      "3DSLIBRIS-BOOKSTATE 3\n"
+      "H\t0000000100000001\t1\t1\t0\t1\t1\tq\t\t\t2\n";
+  test::ExpectTrue("v3 parsed", annotation_store_utils::Parse(v3, kConsoleA, &out));
+  test::ExpectEq("v3 color", (int)out.records[0].color, 2);
+  test::ExpectEq("v3 not uploaded", (int)out.records[0].readwise_uploaded, 0);
 }
 
 void TestBuildFileName() {
@@ -268,6 +291,7 @@ int main() {
   TestParseV1MigratesIds();
   TestParseRejects();
   TestColors();
+  TestReadwiseFields();
   TestBuildFileName();
   TestFileRoundTrip();
   TestNextId();

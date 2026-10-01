@@ -9,6 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "book/highlight_color_utils.h"
+
+#include <ctype.h>
+
 namespace readwise_api_utils {
 
 namespace {
@@ -117,9 +121,10 @@ std::string BuildHighlightsJson(const std::vector<Highlight> &highlights) {
     if (!h.author.empty())
       AppendField(&out, "author",
                   JsonString(Truncate(h.author, kMaxAuthorChars)), &first);
-    if (!h.note.empty())
-      AppendField(&out, "note", JsonString(Truncate(h.note, kMaxNoteChars)),
-                  &first);
+    AppendField(&out, "note",
+                JsonString(Truncate(NoteWithTag(h.color, h.note),
+                                    kMaxNoteChars)),
+                &first);
     AppendField(&out, "category", "\"books\"", &first);
     AppendField(&out, "source_type", "\"3dslibris\"", &first);
     if (h.location > 0) {
@@ -178,15 +183,57 @@ UploadLog ParseLog(const std::string &data) {
   return log;
 }
 
-std::vector<Highlight> Pending(const std::vector<Highlight> &all,
-                               const UploadLog &log) {
-  std::vector<Highlight> out;
+std::string ColorTag(uint8_t color) {
+  return highlight_color_utils::Name(color);
+}
+
+std::string NoteWithTag(uint8_t color, const std::string &note) {
+  const std::string tag = "." + ColorTag(color);
+  return note.empty() ? tag : tag + "\n" + note;
+}
+
+Work Classify(const std::vector<Highlight> &all, const UploadLog &legacy_log) {
+  Work work;
   for (size_t i = 0; i < all.size(); i++) {
-    UploadLog::const_iterator it = log.find(all[i].id);
-    if (it == log.end() || it->second != all[i].modified)
-      out.push_back(all[i]);
+    const Highlight &h = all[i];
+    if (h.readwise_uploaded != 0) {
+      if (h.readwise_uploaded == h.modified)
+        continue; // up to date
+      work.update.push_back(h);
+      work.update_note.push_back(true);
+      continue;
+    }
+    UploadLog::const_iterator it = legacy_log.find(h.id);
+    if (it == legacy_log.end()) {
+      work.create.push_back(h);
+    } else {
+      // Sent by an older version: no color tag; the note too if edited.
+      work.update.push_back(h);
+      work.update_note.push_back(it->second != h.modified);
+    }
   }
-  return out;
+  return work;
+}
+
+bool SameText(const std::string &a, const std::string &b) {
+  size_t ab = 0, ae = a.size(), bb = 0, be = b.size();
+  while (ab < ae && isspace((unsigned char)a[ab]))
+    ab++;
+  while (ae > ab && isspace((unsigned char)a[ae - 1]))
+    ae--;
+  while (bb < be && isspace((unsigned char)b[bb]))
+    bb++;
+  while (be > bb && isspace((unsigned char)b[be - 1]))
+    be--;
+  return ae - ab == be - bb && a.compare(ab, ae - ab, b, bb, be - bb) == 0;
+}
+
+std::string PatchNoteJson(const std::string &note) {
+  return "{\"note\":" + JsonString(Truncate(note, kMaxNoteChars)) + "}";
+}
+
+std::string TagJson(const std::string &name) {
+  return "{\"name\":" + JsonString(name) + "}";
 }
 
 std::string CleanToken(const std::string &raw) {

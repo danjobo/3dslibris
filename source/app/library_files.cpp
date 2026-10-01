@@ -7,7 +7,9 @@
 #include "app/library_files.h"
 
 #include "app/app.h"
+#include "book/annotation_store_utils.h"
 #include "book/book.h"
+#include "shared/console_id.h"
 #include "shared/app_flow_utils.h"
 #include "shared/path_constants.h"
 #include "shared/utf8_utils.h"
@@ -90,6 +92,11 @@ HighlightSet CollectHighlights(App &app) {
         const int page = loaded ? book->GetAnnotationPage(a.id) : -1;
         h.location = (page >= 0 ? page : (int)a.page_hint) + 1;
         h.highlighted_at = a.created;
+        h.color = a.color;
+        h.readwise_uploaded = a.readwise_uploaded;
+        h.readwise_id = a.readwise_id;
+        h.folder = files[f].folder;
+        h.file_name = files[f].file_name;
         set.highlights.push_back(h);
         any = true;
       }
@@ -100,6 +107,51 @@ HighlightSet CollectHighlights(App &app) {
       delete book;
   }
   return set;
+}
+
+int SaveUploadState(App &app,
+                    const std::vector<readwise_api_utils::Highlight> &done) {
+  int saved = 0;
+  std::vector<bool> handled(done.size(), false);
+  for (size_t i = 0; i < done.size(); i++) {
+    if (handled[i])
+      continue;
+    // Everything for this book at once.
+    sync_book_files::LocalBook file;
+    file.folder = done[i].folder;
+    file.file_name = done[i].file_name;
+    Book *loaded = LoadedBook(app, file);
+    const std::string path =
+        paths::GetAnnotationsDir() + "/" +
+        annotation_store_utils::BuildFileName(file.folder, file.file_name);
+    BookState state;
+    const bool have_file =
+        loaded || annotation_store_utils::LoadFile(path, console_id::Prefix(),
+                                                   &state);
+    for (size_t j = i; j < done.size(); j++) {
+      if (handled[j] || done[j].folder != file.folder ||
+          done[j].file_name != file.file_name)
+        continue;
+      handled[j] = true;
+      if (loaded) {
+        if (loaded->SetReadwiseState(done[j].id, done[j].readwise_uploaded,
+                                     done[j].readwise_id))
+          saved++;
+        continue;
+      }
+      for (size_t r = 0; have_file && r < state.records.size(); r++) {
+        if (state.records[r].id != done[j].id)
+          continue;
+        state.records[r].readwise_uploaded = done[j].readwise_uploaded;
+        if (done[j].readwise_id)
+          state.records[r].readwise_id = done[j].readwise_id;
+        saved++;
+      }
+    }
+    if (!loaded && have_file)
+      annotation_store_utils::SaveFile(path, state);
+  }
+  return saved;
 }
 
 } // namespace library_files

@@ -11,6 +11,7 @@ namespace {
 static const char *kHeaderV1 = "3DSLIBRIS-ANNOTATIONS 1";
 static const char *kHeaderV2 = "3DSLIBRIS-BOOKSTATE 2";
 static const char *kHeaderV3 = "3DSLIBRIS-BOOKSTATE 3";
+static const char *kHeaderV4 = "3DSLIBRIS-BOOKSTATE 4";
 static const size_t kMaxFileBytes = 4 * 1024 * 1024;
 
 void SplitTabs(const std::string &line, std::vector<std::string> *fields) {
@@ -95,13 +96,24 @@ bool ParseV1Line(const std::vector<std::string> &f, uint32_t console_prefix,
 
 // v2 H/B: kind id created modified deleted page_hint page_count_hint quote
 //         prefix note
-// v2 records have 10 fields; v3 adds the highlight color.
+// v2 records have 10 fields; v3 adds the highlight color, v4 the Readwise
+// upload state.
 bool ParseV2Record(const std::vector<std::string> &f, Annotation *a) {
-  if ((f.size() != 10 && f.size() != 11) || (f[0] != "H" && f[0] != "B"))
+  if ((f.size() != 10 && f.size() != 11 && f.size() != 13) ||
+      (f[0] != "H" && f[0] != "B"))
     return false;
   unsigned long color = 0;
-  if (f.size() == 11 && !ParseU32(f[10], 0xFFUL, &color))
+  if (f.size() >= 11 && !ParseU32(f[10], 0xFFUL, &color))
     return false;
+  unsigned long uploaded = 0;
+  a->readwise_uploaded = 0;
+  a->readwise_id = 0;
+  if (f.size() == 13) {
+    if (!ParseU32(f[11], 0xFFFFFFFFUL, &uploaded) ||
+        !ParseHex64(f[12], &a->readwise_id))
+      return false;
+    a->readwise_uploaded = (uint32_t)uploaded;
+  }
   // Unknown colors (from a newer version) show as yellow.
   a->color = color < highlight_color_utils::kCount ? (uint8_t)color : 0;
   unsigned long created = 0, modified = 0, deleted = 0, page = 0, count = 0;
@@ -199,7 +211,7 @@ std::string UnescapeField(const std::string &in) {
 }
 
 std::string Serialize(const BookState &state) {
-  std::string out = kHeaderV3;
+  std::string out = kHeaderV4;
   out.push_back('\n');
   if (state.has_progress) {
     const ReadingProgress &p = state.progress;
@@ -238,6 +250,11 @@ std::string Serialize(const BookState &state) {
     out += EscapeField(a.note);
     out.push_back('\t');
     AppendUnsigned(&out, a.color);
+    out.push_back('\t');
+    AppendUnsigned(&out, a.readwise_uploaded);
+    char rw_id[24];
+    snprintf(rw_id, sizeof(rw_id), "\t%llx", (unsigned long long)a.readwise_id);
+    out += rw_id;
     out.push_back('\n');
   }
   return out;
@@ -262,8 +279,8 @@ bool Parse(const std::string &data, uint32_t console_prefix, BookState *out) {
     if (version == 0) {
       if (line == kHeaderV1)
         version = 1;
-      else if (line == kHeaderV2 || line == kHeaderV3)
-        version = 2; // v3 records are v2 records plus a color
+      else if (line == kHeaderV2 || line == kHeaderV3 || line == kHeaderV4)
+        version = 2; // v3/v4 records are v2 records plus trailing fields
       else
         return false;
       continue;

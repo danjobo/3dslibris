@@ -114,9 +114,12 @@ Syncing with another 3DS (Wi-Fi or local wireless):
 
 Readwise (GENERAL settings, second page > Readwise):
 - Upload highlights: sends highlights and notes from every book (all
-  folders) straight to Readwise over Wi-Fi. Only new or edited ones are
-  sent each time. Deleting a highlight here doesn't delete it in
-  Readwise
+  folders) straight to Readwise over Wi-Fi, with each highlight's color
+  as a tag (yellow, green, blue, pink, purple). Only new or edited ones
+  are sent; an edited note or color updates the highlight in Readwise.
+  What has been uploaded is shared when two consoles sync, so the other
+  console doesn't send it again. Deleting a highlight here doesn't
+  delete it in Readwise
 - Your access token (from readwise.io/access_token) is needed once:
   put it in `sdmc:/3ds/3dslibris/readwise-token.txt` from a computer,
   or choose "Readwise token" and type it. It is stored as plain text

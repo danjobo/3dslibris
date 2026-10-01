@@ -8,6 +8,8 @@
     - Highlights and bookmarks: combined by id. For the same id the newer
       modified wins; on a tie a deletion wins, then a fixed field order
       decides, so the result never depends on which side merges.
+    - Readwise upload state is combined separately: the newest uploaded
+      version either console sent, and Readwise's id if either knows it.
 */
 
 #pragma once
@@ -27,10 +29,15 @@ struct MergeStats {
   int records_added;    // new from the other console
   int records_updated;  // changed (edits, deletions) by the other console
   bool progress_changed;
+  // Readwise upload state learned from the other console (not shown).
+  int uploads_learned;
 
-  MergeStats() : records_added(0), records_updated(0), progress_changed(false) {}
+  MergeStats()
+      : records_added(0), records_updated(0), progress_changed(false),
+        uploads_learned(0) {}
   bool Changed() const {
-    return records_added || records_updated || progress_changed;
+    return records_added || records_updated || progress_changed ||
+           uploads_learned;
   }
 };
 

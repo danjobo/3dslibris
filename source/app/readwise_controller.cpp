@@ -15,6 +15,7 @@
 #include "app/frame_input.h"
 #include "app/https_client.h"
 #include "app/library_files.h"
+#include "app/readwise_client.h"
 #include "book/readwise_api_utils.h"
 #include "book/readwise_export.h"
 #include "shared/path_constants.h"
@@ -33,7 +34,6 @@ const int kTextX = 8;
 const int kTextWidth = 228;
 
 const char kAuthUrl[] = "https://readwise.io/api/v2/auth/";
-const char kHighlightsUrl[] = "https://readwise.io/api/v2/highlights/";
 
 std::string TokenPath() { return paths::GetSdmcBase() + "/readwise-token.txt"; }
 std::string LogPath() { return paths::GetSdmcBase() + "/readwise-uploaded.txt"; }
@@ -188,12 +188,13 @@ void ReadwiseController::Upload() {
     return;
   }
   const library_files::HighlightSet set = library_files::CollectHighlights(app_);
+  // Highlights sent by versions before the upload state was kept in the
+  // book data are listed in this per-console log.
   std::string log_text;
   ReadFile(LogPath(), &log_text);
-  readwise_api_utils::UploadLog log = readwise_api_utils::ParseLog(log_text);
-  const std::vector<readwise_api_utils::Highlight> pending =
-      readwise_api_utils::Pending(set.highlights, log);
-  if (pending.empty()) {
+  const readwise_api_utils::Work work = readwise_api_utils::Classify(
+      set.highlights, readwise_api_utils::ParseLog(log_text));
+  if (work.create.empty() && work.update.empty()) {
     SetLines(set.highlights.empty()
                  ? std::string("No highlights yet.")
                  : "All " + Plural((int)set.highlights.size(), "highlight") +
@@ -202,60 +203,80 @@ void ReadwiseController::Upload() {
   }
 
   https_client::Session session;
-  if (!session.ok()) {
-    SetLines("Couldn't connect:", session.error());
+  if (!session.ok() || !session.HasNetwork()) {
+    SetLines("Not connected to Wi-Fi.");
     return;
   }
-  std::vector<std::string> headers = AuthHeaders(token);
-  headers.push_back("Content-Type: application/json");
-  size_t sent = 0;
+  readwise_client::Client client(session, token);
+  std::vector<readwise_api_utils::Highlight> done;
+  int created = 0, updated = 0;
   std::string failure;
-  for (size_t start = 0; start < pending.size();
+
+  // New highlights, in batches (their color goes in as a tag).
+  for (size_t start = 0; start < work.create.size() && failure.empty();
        start += readwise_api_utils::kBatchSize) {
     const size_t end =
-        std::min(pending.size(), start + readwise_api_utils::kBatchSize);
-    const std::vector<readwise_api_utils::Highlight> batch(
-        pending.begin() + start, pending.begin() + end);
-    https_client::Response response;
-    if (!https_client::Request(session, "POST", kHighlightsUrl, headers,
-                               readwise_api_utils::BuildHighlightsJson(batch),
-                               &response, 60)) {
-      failure = "Couldn't reach Readwise: " + response.error;
+        std::min(work.create.size(), start + readwise_api_utils::kBatchSize);
+    std::vector<readwise_api_utils::Highlight> batch(
+        work.create.begin() + start, work.create.begin() + end);
+    if (!client.Create(batch)) {
+      failure = client.error();
       break;
     }
-    if (response.status == 401 || response.status == 403) {
-      failure = "Readwise didn't accept the token.";
-      break;
+    for (size_t i = 0; i < batch.size(); i++) {
+      batch[i].readwise_uploaded = batch[i].modified;
+      done.push_back(batch[i]);
     }
-    if (response.status == 429) {
-      failure = "Readwise is busy. Try again in a minute.";
-      break;
-    }
-    if (response.status < 200 || response.status >= 300) {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "Readwise answered HTTP %ld.",
-               response.status);
-      failure = buf;
-      app_.PrintStatus("READWISE upload failed body=" +
-                       response.body.substr(0, 300));
-      break;
-    }
-    for (size_t i = 0; i < batch.size(); i++)
-      log[batch[i].id] = batch[i].modified;
-    // Saved after every batch, so a failure later doesn't resend these.
-    WriteFile(LogPath(), readwise_api_utils::SerializeLog(log));
-    sent += batch.size();
+    created += (int)batch.size();
+    // Kept after every batch, so a later failure doesn't resend these.
+    library_files::SaveUploadState(app_, done);
+    done.clear();
   }
 
+  // Highlights already in Readwise whose note or color changed (or that
+  // were sent before colors were): update them by Readwise's id.
+  for (size_t i = 0; i < work.update.size() && failure.empty(); i++) {
+    readwise_api_utils::Highlight h = work.update[i];
+    uint64_t id = h.readwise_id;
+    if (!id && !client.FindHighlightId(h, &id)) {
+      failure = client.error();
+      break;
+    }
+    if (!id) {
+      // Not in Readwise after all (e.g. deleted there): create it again.
+      std::vector<readwise_api_utils::Highlight> one(1, h);
+      if (!client.Create(one)) {
+        failure = client.error();
+        break;
+      }
+      created++;
+    } else if ((work.update_note[i] && !client.UpdateNote(id, h.note)) ||
+               !client.SetColorTag(id, h.color)) {
+      failure = client.error();
+      break;
+    }
+    h.readwise_uploaded = h.modified;
+    h.readwise_id = id;
+    done.push_back(h);
+    if (id)
+      updated++;
+    if (done.size() >= 10) {
+      library_files::SaveUploadState(app_, done);
+      done.clear();
+    }
+  }
+  library_files::SaveUploadState(app_, done);
+
   char line[96];
-  snprintf(line, sizeof(line), "Uploaded %s.",
-           Plural((int)sent, "highlight").c_str());
+  snprintf(line, sizeof(line), "Sent %s, updated %s.",
+           Plural(created, "new highlight").c_str(),
+           Plural(updated, "highlight").c_str());
   app_.PrintStatus(std::string("READWISE ") + line +
                    (failure.empty() ? "" : " " + failure));
   if (failure.empty())
-    SetLines(line, "Deleting a highlight here doesn't",
-             "delete it in Readwise.");
-  else if (sent > 0)
+    SetLines(line, "Colors are added as tags. Deleting a",
+             "highlight here doesn't delete it there.");
+  else if (created + updated > 0)
     SetLines(line, failure);
   else
     SetLines("Upload failed:", failure);

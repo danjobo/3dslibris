@@ -176,6 +176,22 @@ bool Book::SetAnnotationColor(uint64_t id, uint8_t color) {
   return false;
 }
 
+bool Book::SetReadwiseState(uint64_t id, uint32_t uploaded,
+                            uint64_t readwise_id) {
+  EnsureAnnotationsLoaded();
+  for (size_t i = 0; i < state_.records.size(); i++) {
+    Annotation &a = state_.records[i];
+    if (a.id != id || !a.IsLiveHighlight())
+      continue;
+    a.readwise_uploaded = uploaded;
+    if (readwise_id)
+      a.readwise_id = readwise_id;
+    SaveAnnotations();
+    return true;
+  }
+  return false;
+}
+
 bool Book::RemoveAnnotation(uint64_t id) {
   EnsureAnnotationsLoaded();
   for (size_t i = 0; i < state_.records.size(); i++) {
