@@ -38,30 +38,6 @@ void DrawProgressBar(Text *ts, uint16_t *screen, int x, int y, int w, int h,
   ts->MarkScreenDirtyRect(screen, x, y, x + w, y + h);
 }
 
-int DrawBadge(Text *ts, uint16_t *screen, int x, int y, const char *label,
-              uint16_t bg, uint16_t fg, bool right_aligned) {
-  if (!label || !label[0])
-    return 0;
-  ts->SetPixelSize(9);
-  const int text_w = ts->GetStringWidth(label, TEXT_STYLE_BROWSER);
-  const int w = text_w + 8;
-  const int h = 13;
-  if (right_aligned)
-    x -= w;
-  const Surface s = SurfaceFor(ts, screen);
-  // A pill: a rectangle with its four corner pixels left out.
-  library_paint_utils::FillRect(s, x + 1, y, x + w - 1, y + h, bg);
-  library_paint_utils::FillRect(s, x, y + 1, x + 1, y + h - 1, bg);
-  library_paint_utils::FillRect(s, x + w - 1, y + 1, x + w, y + h - 1, bg);
-  ts->MarkScreenDirtyRect(screen, x, y, x + w, y + h);
-
-  ts->SetTextColorOverride(fg);
-  ts->SetPen((u16)(x + 4), (u16)(y + 10));
-  ts->PrintString(label, TEXT_STYLE_BROWSER);
-  ts->ClearTextColorOverride();
-  return w;
-}
-
 void DrawDoneSeal(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
                   const library_theme_utils::LibraryPalette &pal) {
   const Surface s = SurfaceFor(ts, screen);
@@ -85,11 +61,30 @@ void DrawDoneSeal(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
   ts->MarkScreenDirtyRect(screen, cx - ext, cy - ext, cx + ext, cy + ext);
 }
 
+void DrawNewDot(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
+                const library_theme_utils::LibraryPalette &pal) {
+  const Surface s = SurfaceFor(ts, screen);
+  const float r = diameter * 0.5f;
+  const float x = (float)cx;
+  const float y = (float)cy;
+  library_paint_utils::FillCircle(s, x + 1.0f, y + 1.5f, r, 0x0000, 90);
+  library_paint_utils::FillCircle(s, x, y, r, pal.done_fg, 255);
+  library_paint_utils::FillCircle(s, x, y, r - 1.5f, pal.new_bg, 255);
+  // A small highlight toward the top left.
+  const uint16_t glint =
+      library_paint_utils::Blend565(pal.new_bg, pal.done_fg, 150);
+  library_paint_utils::FillCircle(s, x - r * 0.3f, y - r * 0.3f, r * 0.25f,
+                                  glint, 200);
+  const int ext = (int)r + 3;
+  ts->MarkScreenDirtyRect(screen, cx - ext, cy - ext, cx + ext, cy + ext);
+}
+
 void DrawStatusBadge(Text *ts, uint16_t *screen, int x0, int y0, int x1,
                      const library_progress_utils::BookProgress &progress,
                      const library_theme_utils::LibraryPalette &pal) {
   if (progress.is_new) {
-    DrawBadge(ts, screen, x1 - 3, y0 + 3, "NEW", pal.new_bg, pal.new_fg, true);
+    const int d = 13;
+    DrawNewDot(ts, screen, x1 - 4 - d / 2, y0 + 4 + d / 2, d, pal);
   } else if (progress.finished) {
     const int d = 18;
     DrawDoneSeal(ts, screen, x1 - 3 - d / 2, y0 + 3 + d / 2, d, pal);

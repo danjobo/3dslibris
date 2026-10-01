@@ -31,15 +31,15 @@ void DrawProgressBar(Text *ts, uint16_t *screen, int x, int y, int w, int h,
                      int percent,
                      const library_theme_utils::LibraryPalette &pal);
 
-// A filled pill with a short label; (x, y) is its top-left corner. Returns
-// its width. right_aligned: x is the pill's right edge instead.
-int DrawBadge(Text *ts, uint16_t *screen, int x, int y, const char *label,
-              uint16_t bg, uint16_t fg, bool right_aligned);
-
 // The DONE seal: a green disc with a light ring, a soft shadow and a check
 // mark, `diameter` pixels across, centered on (cx, cy).
 void DrawDoneSeal(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
                   const library_theme_utils::LibraryPalette &pal);
+
+// The NEW dot: an accent-colored disc with a light ring and a soft shadow,
+// in the same style as the DONE seal.
+void DrawNewDot(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
+                const library_theme_utils::LibraryPalette &pal);
 
 // NEW or DONE badge for the book's progress, in the top-right corner of the
 // rectangle (x0, y0)-(x1, y1). Nothing for books in progress.

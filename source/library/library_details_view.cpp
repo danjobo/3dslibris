@@ -139,9 +139,8 @@ void Draw(Text *ts, Book *book) {
   char line[64];
 
   if (progress.is_new) {
-    library_draw::DrawBadge(ts, ts->screenleft, (width - 30) / 2, y - 2, "NEW",
-                            pal.new_bg, pal.new_fg, false);
-    y += 13 + small_step;
+    library_draw::DrawNewDot(ts, ts->screenleft, width / 2, y + 6, 16, pal);
+    y += 16 + small_step;
     ts->SetPixelSize(11);
     ts->SetTextColorOverride(pal.muted);
     if (page_count > 0)
