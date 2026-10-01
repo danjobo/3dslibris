@@ -16,6 +16,7 @@
 #include <unistd.h>
 
 #include "app/app.h"
+#include "app/connection_test.h"
 #include "app/frame_input.h"
 #include "book/annotation_store_utils.h"
 #include "book/book.h"
@@ -33,8 +34,8 @@
 namespace {
 
 static const u32 kSocBufferSize = 0x100000;
-// host, join, connection type
-static const int kMenuOptionCount = 3;
+// host, join, connection type, Readwise connection test
+static const int kMenuOptionCount = 4;
 static const int kMenuButtonX = 5;
 static const int kMenuButtonY0 = 70;
 static const int kMenuButtonStride = 46;
@@ -484,6 +485,33 @@ void SyncController::BuildSummary() {
   }
 }
 
+void SyncController::RunConnectionTest() {
+  const std::vector<std::string> results = connection_test::Run();
+  summary_lines_.clear();
+  summary_lines_.push_back("Connection test:");
+  bool checked = false, unchecked = false;
+  for (size_t i = 0; i < results.size(); i++) {
+    summary_lines_.push_back(results[i]);
+    app_.PrintStatus("NETTEST " + results[i]);
+    const bool ok = results[i].find(": OK") != std::string::npos;
+    if (results[i].compare(0, 22, "Readwise, cert checked") == 0)
+      checked = ok;
+    if (results[i].compare(0, 23, "Readwise, no cert check") == 0)
+      unchecked = ok;
+  }
+  summary_lines_.push_back("");
+  if (checked)
+    summary_lines_.push_back("Readwise upload can use the 3DS's own HTTPS.");
+  else if (unchecked)
+    summary_lines_.push_back("Readwise works only without the "
+                             "certificate check.");
+  else
+    summary_lines_.push_back("The 3DS's own HTTPS can't reach Readwise.");
+  summary_lines_.push_back("Please send me these lines.");
+  screen_ = kSummary;
+  dirty_ = true;
+}
+
 void SyncController::EnterPicker() {
   // A different file with the same name (e.g. another edition) can't be
   // saved next to ours, so it isn't offered.
@@ -635,6 +663,10 @@ void SyncController::RunFrame(const FrameInput &input) {
     } else if (chosen == 2) {
       local_wireless_ = !local_wireless_;
       dirty_ = true;
+    } else if (chosen == 3) {
+      // Drawn this frame; the (blocking) test runs on the next one.
+      screen_ = kTesting;
+      dirty_ = true;
     }
     break;
   }
@@ -694,6 +726,9 @@ void SyncController::RunFrame(const FrameInput &input) {
     }
     break;
   }
+  case kTesting:
+    RunConnectionTest();
+    break;
   case kSummary:
   case kError:
     if ((keys & (KEY_A | KEY_B)) || back_touched) {
@@ -893,6 +928,12 @@ void SyncController::Draw() {
     lines.push_back("");
     lines.push_back("A: done");
     break;
+  case kTesting:
+    lines.push_back("Testing secure connections to");
+    lines.push_back("Readwise and Hardcover...");
+    lines.push_back("");
+    lines.push_back("This can take up to a minute.");
+    break;
   case kError:
     lines.push_back("Sync failed:");
     lines.push_back(message_);
@@ -926,10 +967,11 @@ void SyncController::Draw() {
   if (screen_ == kMenu) {
     const char *labels[kMenuOptionCount] = {
         "host a sync", "join a sync",
-        local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi"};
-    const char *hints[kMenuOptionCount] = {"show a pairing code here >",
-                                           "enter the host's code >",
-                                           "both consoles must match >"};
+        local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi",
+        "test Readwise connection"};
+    const char *hints[kMenuOptionCount] = {
+        "show a pairing code here >", "enter the host's code >",
+        "both consoles must match >", "needs Wi-Fi >"};
     for (int i = 0; i < kMenuOptionCount; i++) {
       Button button(ts);
       LayoutMenuButton(&button, i);

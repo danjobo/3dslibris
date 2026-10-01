@@ -154,8 +154,8 @@ AccessControlInfo:
    - ptm:u
    - soc:U # sockets (Wi-Fi sync)
    - nwm::UDS # local wireless sync
-   # - http:C # download content
-   # - ssl:C
+   - http:C # HTTPS (Readwise)
+   - ssl:C
    # - pxi:dev # low level processor
    # - dsp::DSP # música
 

@@ -154,6 +154,8 @@ AccessControlInfo:
    - ptm:u
    - soc:U # sockets (Wi-Fi sync)
    - nwm::UDS # local wireless sync
+   - http:C # HTTPS (Readwise)
+   - ssl:C
 
 SystemControlInfo:
   SaveDataSize            : 0KB

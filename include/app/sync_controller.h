@@ -44,6 +44,7 @@ private:
     kTransferring, // copying books here
     kSummary,
     kError,
+    kTesting, // Readwise connection test (diagnostic)
   };
 
   // A book file in this console's library, and its Book if it is loaded.
@@ -64,6 +65,7 @@ private:
   void ApplyResults();
   void SaveReceivedBooks();
   void BuildSummary();
+  void RunConnectionTest();
   void EnterPicker();
   void RunPicker(uint32_t keys, bool touched, int touch_x, int touch_y);
   int PickerVisibleRows() const;
