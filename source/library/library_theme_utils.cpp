@@ -23,6 +23,8 @@ LibraryPalette ForColorMode(int color_mode) {
 
   const bool sepia = color_mode == 2 || color_mode == 5;
   if (IsDarkColorMode(color_mode)) {
+    p.shelf = sepia ? Rgb565(100, 72, 46) : Rgb565(88, 66, 48);
+    p.shelf_edge = Blend565(p.shelf, Rgb565(0, 0, 0), 110);
     p.accent = sepia ? Rgb565(222, 162, 100) : Rgb565(110, 165, 255);
     p.track = Blend565(p.background, p.text, 60);
     p.shadow = Rgb565(0, 0, 0);
@@ -31,6 +33,8 @@ LibraryPalette ForColorMode(int color_mode) {
     p.done_bg = sepia ? Rgb565(160, 180, 105) : Rgb565(95, 195, 125);
     p.done_fg = p.new_fg;
   } else {
+    p.shelf = sepia ? Rgb565(176, 130, 84) : Rgb565(186, 146, 104);
+    p.shelf_edge = Blend565(p.shelf, Rgb565(0, 0, 0), 80);
     p.accent = sepia ? Rgb565(165, 90, 40) : Rgb565(35, 105, 215);
     p.track = Blend565(p.background, p.text, 40);
     p.shadow = Blend565(p.background, p.text, 70);

@@ -112,9 +112,7 @@ static void ToggleBrowserViewSetting(App *app) {
   if (!app || !app->prefs.get())
     return;
   app->prefs->browser_view_mode =
-      app->prefs->browser_view_mode == BROWSER_VIEW_LIST
-          ? BROWSER_VIEW_GALLERY
-          : BROWSER_VIEW_LIST;
+      browser_view_utils::NextMode(app->prefs->browser_view_mode);
   if (app->GetSelectedBook()) {
     const int selected_index = app->GetBookIndex(app->GetSelectedBook());
     const int page_size =

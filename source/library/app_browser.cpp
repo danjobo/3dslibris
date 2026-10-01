@@ -50,6 +50,7 @@
 #include "library/browser_grid_view.h"
 #include "library/browser_job_queue_utils.h"
 #include "library/browser_list_view.h"
+#include "library/browser_shelf_view.h"
 #include "library/browser_presentation_utils.h"
 #include "library/browser_view_utils.h"
 #include "library/browser_warmup_utils.h"
@@ -393,6 +394,9 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
         book_idx = browser_list_view::HitTestBookIndex(
             x, y, app_.GetBrowserPageStart(), app_.BookCount(),
             CurrentBrowserPageSize(app_));
+      } else if (CurrentBrowserViewMode(app_) == BROWSER_VIEW_SHELF) {
+        book_idx = browser_shelf_view::HitTestBookIndex(
+            x, y, app_.GetBrowserPageStart(), app_.BookCount());
       } else {
         book_idx = browser_grid_view::HitTestBookIndex(
             x, y, app_.GetBrowserPageStart(), app_.BookCount());
@@ -431,6 +435,7 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
 }
 
 void LibraryController::browser_init(void) {
+  large_cover_checked_ = nullptr;
   for (int i = 0; i < app_.BookCount(); i++) {
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
     int col = page_idx % browser_grid_view::kGridCols;
@@ -518,6 +523,7 @@ void LibraryController::browser_draw(void) {
   app_.ts->SetScreen(app_.ts->screenleft);
   app_.ts->SetStyle(TEXT_STYLE_BROWSER);
   Book *selected = app_.GetSelectedBook();
+  PrepareSelectedLargeCover();
   if (selected) {
     // Top screen: the selected book's cover and reading progress.
     app_.DrawTopGradientBackground();
@@ -549,6 +555,8 @@ void LibraryController::browser_draw(void) {
     library_draw::TextStateGuard guard(app_.ts.get());
     if (view_mode == BROWSER_VIEW_LIST)
       browser_list_view::DrawPage(ctx, app_.GetBrowserPageStart(), page_size);
+    else if (view_mode == BROWSER_VIEW_SHELF)
+      browser_shelf_view::DrawPage(ctx, app_.GetBrowserPageStart());
     else
       browser_grid_view::DrawPage(ctx, g_marquee, app_.GetBrowserPageStart());
   }

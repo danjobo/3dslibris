@@ -87,7 +87,8 @@ static bool SupportsBrowserCoverWarmup(const App &app, format_t format,
 static size_t CountQueuedHeavyJobs(const std::deque<app_job_t> &jobs) {
   size_t count = 0;
   for (const auto &job : jobs) {
-    if (browser_job_queue_utils::IsHeavyBrowserJobType(
+    if (job.type == APP_JOB_EXTRACT_LARGE_COVER ||
+        browser_job_queue_utils::IsHeavyBrowserJobType(
             job.type, APP_JOB_INDEX_METADATA, APP_JOB_EXTRACT_COVER)) {
       count++;
     }
@@ -103,6 +104,41 @@ static std::string BuildBookPath(Book *book) {
   path.push_back('/');
   path.append(book->GetFileName());
   return path;
+}
+
+// RunCoverExtractor results besides 0 and the extractors' error codes.
+static const int kCoverNoExtractor = -1000;   // no embedded cover to look for
+static const int kCoverNeedsMetadata = -1001; // EPUB: index metadata first
+
+// Fills book->coverPixels from the book's own cover (an image next to it
+// first), at the extract size. Doesn't save or touch the retry counters.
+static int RunCoverExtractor(Book *book, const std::string &path) {
+  if (cover_cache::TryLoadAdjacentOverride(book, path))
+    return 0;
+  HomeButtonGuard home_guard;
+  if (book->format == FORMAT_EPUB) {
+    if (!book->metadataIndexTried)
+      return kCoverNeedsMetadata;
+    if (book->coverImagePath.empty())
+      return kCoverNoExtractor;
+    return epub_parser::ExtractCover(book, path);
+  }
+  if (book->format == FORMAT_XHTML && HasExtCI(book->GetFileName(), ".fb2"))
+    return fb2_parser::ExtractCover(book, path);
+  if (book->format == FORMAT_XHTML && HasExtCI(book->GetFileName(), ".mobi"))
+    return mobi_parser::ExtractCover(book, path);
+  if (book->format == FORMAT_PDF)
+    return pdf_parser::ExtractCover(book, path);
+  if (book->format == FORMAT_CBZ)
+    return cbz_parser::ExtractCover(book, path);
+  // Formats like TXT/MD/RTF/ODT have no embedded-cover extractor.
+  return kCoverNoExtractor;
+}
+
+static bool IsHeavyJob(app_job_type_t type) {
+  return type == APP_JOB_EXTRACT_LARGE_COVER ||
+         browser_job_queue_utils::IsHeavyBrowserJobType(
+             type, APP_JOB_INDEX_METADATA, APP_JOB_EXTRACT_COVER);
 }
 
 } // namespace
@@ -307,6 +343,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       return "index";
     case APP_JOB_EXTRACT_COVER:
       return "cover";
+    case APP_JOB_EXTRACT_LARGE_COVER:
+      return "large-cover";
     case APP_JOB_RESOLVE_TOC:
       return "toc";
     default:
@@ -340,11 +378,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         &job_queue_, &job, [&](const app_job_t &candidate) {
           if (!candidate.book || candidate.book->IsBrowserFolder())
             return false;
-          if (!browser_job_queue_utils::IsHeavyBrowserJobType(
-                  candidate.type, APP_JOB_INDEX_METADATA,
-                  APP_JOB_EXTRACT_COVER)) {
+          if (!IsHeavyJob(candidate.type))
             return true;
-          }
           if (app_.GetMode() != AppMode::Browser)
             return true;
           if (candidate.book == app_.GetSelectedBook())
@@ -417,95 +452,29 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           continue;
         }
 
-        if (cover_cache::TryLoadAdjacentOverride(book, path)) {
+        rc = RunCoverExtractor(book, path);
+        if (rc == kCoverNeedsMetadata) {
+          // Metadata not yet attempted; queue it first and retry cover after.
+          EnqueueJob(APP_JOB_INDEX_METADATA, book);
+          EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+          rc = 0;
+        } else if (rc == 0 && book->coverPixels) {
           cover_cache::Save(book, path);
+          // Only the selected book keeps its large cover.
+          if (book != app_.GetSelectedBook())
+            book->ReleaseLargeCover();
           book->coverAttempts = kCoverMaxAttempts;
           book->coverRetryAfterMs = 0;
-          rc = 0;
-        } else
-        if (book->format == FORMAT_EPUB) {
-          if (!book->metadataIndexTried) {
-            // Metadata not yet attempted; queue it first and retry cover after.
-            EnqueueJob(APP_JOB_INDEX_METADATA, book);
-            EnqueueJob(APP_JOB_EXTRACT_COVER, book);
-          } else {
-            if (!book->coverImagePath.empty()) {
-              HomeButtonGuard home_guard;
-              rc = epub_parser::ExtractCover(book, path);
-              if (rc == 0 && book->coverPixels) {
-                cover_cache::Save(book, path);
-                book->coverAttempts = kCoverMaxAttempts;
-                book->coverRetryAfterMs = 0;
-              } else if (rc == BOOK_ERR_CANCELLED) {
-              } else if (rc != 0) {
-                book->coverAttempts++;
-              } else {
-                book->coverAttempts = kCoverMaxAttempts;
-              }
-            } else {
-              book->coverAttempts = kCoverMaxAttempts;
-            }
-          }
-        } else if (book->format == FORMAT_XHTML &&
-                   HasExtCI(book->GetFileName(), ".fb2")) {
-          HomeButtonGuard home_guard;
-          rc = fb2_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
+        } else if (rc == BOOK_ERR_CANCELLED) {
+        } else if (rc == kCoverNoExtractor) {
+          book->coverAttempts = kCoverMaxAttempts;
+        } else if (rc != 0) {
+          if (book->format == FORMAT_PDF &&
+              browser_warmup_utils::IsPermanentCoverFailure(rc))
             book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
+          else
             book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
-        } else if (book->format == FORMAT_XHTML &&
-                   HasExtCI(book->GetFileName(), ".mobi")) {
-          HomeButtonGuard home_guard;
-          rc = mobi_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
-        } else if (book->format == FORMAT_PDF) {
-          HomeButtonGuard home_guard;
-          rc = pdf_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            if (browser_warmup_utils::IsPermanentCoverFailure(rc))
-              book->coverAttempts = kCoverMaxAttempts;
-            else
-              book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
-        } else if (book->format == FORMAT_CBZ) {
-          HomeButtonGuard home_guard;
-          rc = cbz_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
         } else {
-          // Formats like TXT/MD/RTF/ODT have no embedded-cover extractor.
-          // If no adjacent override was found, stop retrying.
           book->coverAttempts = kCoverMaxAttempts;
         }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
@@ -558,6 +527,32 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 #endif
         }
       }
+    } else if (job.type == APP_JOB_EXTRACT_LARGE_COVER) {
+      // A book cached before covers were extracted large: extract it again
+      // for the top screen. Only while it's still selected.
+      const std::string path = BuildBookPath(book);
+      if (book == app_.GetSelectedBook() && !book->largeCoverPixels &&
+          book->largeCoverAttempts == 0 && !path.empty() &&
+          browser_warmup_utils::HasCoverExtractionHeadroom(
+              app_.IsNew3dsDevice(), true,
+              (u64)osGetMemRegionFree(MEMREGION_ALL))) {
+        book->largeCoverAttempts = 1;
+        u16 *thumb = book->coverPixels;
+        const int thumb_w = book->coverWidth;
+        const int thumb_h = book->coverHeight;
+        book->coverPixels = nullptr;
+        rc = RunCoverExtractor(book, path);
+        if (rc == 0 && book->coverPixels && cover_cache::Save(book, path)) {
+          delete[] thumb;
+        } else {
+          delete[] book->coverPixels;
+          book->coverPixels = thumb;
+          book->coverWidth = thumb_w;
+          book->coverHeight = thumb_h;
+        }
+        if (book->largeCoverPixels && app_.GetMode() == AppMode::Browser)
+          app_.SetBrowserDirty(true);
+      }
     } else if (job.type == APP_JOB_RESOLVE_TOC) {
       if (book->format == FORMAT_EPUB && !book->tocResolveTried) {
         std::string path = BuildBookPath(book);
@@ -606,8 +601,7 @@ size_t LibraryController::PauseBrowserJobs() {
   while (!job_queue_.empty()) {
     const app_job_t job = job_queue_.front();
     job_queue_.pop_front();
-    if (browser_job_queue_utils::IsHeavyBrowserJobType(
-            job.type, APP_JOB_INDEX_METADATA, APP_JOB_EXTRACT_COVER)) {
+    if (IsHeavyJob(job.type)) {
       removed++;
       continue;
     }

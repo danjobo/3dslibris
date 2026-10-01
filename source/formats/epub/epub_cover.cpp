@@ -191,8 +191,8 @@ static bool DecodePngCoverThumbnail(const std::vector<u8> &decodebuf,
   int thumb_h = 0;
   float scale = 1.0f;
   if (!epub_cover_decode_utils::ComputeCoverThumbSize(
-          (int)img_w, (int)img_h, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, &thumb_w, &thumb_h,
+          (int)img_w, (int)img_h, cover_layout::kCoverExtractWidth,
+          cover_layout::kCoverExtractHeight, &thumb_w, &thumb_h,
           &scale)) {
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     return false;
@@ -277,8 +277,8 @@ static bool DecodeImageCoverThumbnailWithMuPdf(const std::vector<u8> &decodebuf,
     int thumb_h = 0;
     float scale = 1.0f;
     if (!epub_cover_decode_utils::ComputeCoverThumbSize(
-            image->w, image->h, cover_layout::kBrowserCoverThumbWidth,
-            cover_layout::kBrowserCoverThumbHeight, &thumb_w, &thumb_h,
+            image->w, image->h, cover_layout::kCoverExtractWidth,
+            cover_layout::kCoverExtractHeight, &thumb_w, &thumb_h,
             &scale)) {
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid cover thumbnail size");
     }

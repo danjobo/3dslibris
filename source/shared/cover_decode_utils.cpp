@@ -40,8 +40,8 @@ bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
 
   const aspect_fit_utils::Placement placement =
       aspect_fit_utils::FitInsideBox(
-          0, 0, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, img_w, img_h, false);
+          0, 0, cover_layout::kCoverExtractWidth,
+          cover_layout::kCoverExtractHeight, img_w, img_h, false);
   const int final_w = placement.width;
   const int final_h = placement.height;
   if (final_w <= 0 || final_h <= 0) {

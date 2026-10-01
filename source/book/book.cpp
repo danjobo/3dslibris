@@ -86,6 +86,10 @@ Book::Book(const BookContext &c) : ctx(c) {
   coverPixels = nullptr;
   coverWidth = 0;
   coverHeight = 0;
+  largeCoverPixels = nullptr;
+  largeCoverWidth = 0;
+  largeCoverHeight = 0;
+  largeCoverAttempts = 0;
 
   // Cover state / metadata parsing / TOC resolution
   coverAttempts = 0;
@@ -130,6 +134,14 @@ Book::~Book() {
     delete[] coverPixels;
     coverPixels = nullptr;
   }
+  ReleaseLargeCover();
+}
+
+void Book::ReleaseLargeCover() {
+  delete[] largeCoverPixels;
+  largeCoverPixels = nullptr;
+  largeCoverWidth = 0;
+  largeCoverHeight = 0;
 }
 
 IStatusReporter *Book::GetStatusReporter() {

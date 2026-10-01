@@ -80,6 +80,28 @@ int main() {
   ExpectMode("parse list", browser_view_utils::ParsePrefValue("list"),
              BROWSER_VIEW_LIST);
 
+  ExpectEq("shelf page size", browser_view_utils::PageSize(BROWSER_VIEW_SHELF),
+           9);
+  ExpectEq("shelf columns", browser_view_utils::ColumnCount(BROWSER_VIEW_SHELF),
+           3);
+  ExpectTrue("shelf loads covers",
+             browser_view_utils::ShouldLoadCovers(BROWSER_VIEW_SHELF));
+  ExpectEq("shelf label", browser_view_utils::Label(BROWSER_VIEW_SHELF),
+           "Shelf");
+  ExpectMode("shelf pref round trip",
+             browser_view_utils::ParsePrefValue(
+                 browser_view_utils::ToPrefValue(BROWSER_VIEW_SHELF)),
+             BROWSER_VIEW_SHELF);
+  ExpectMode("toggle gallery -> shelf",
+             browser_view_utils::NextMode(BROWSER_VIEW_GALLERY),
+             BROWSER_VIEW_SHELF);
+  ExpectMode("toggle shelf -> list",
+             browser_view_utils::NextMode(BROWSER_VIEW_SHELF),
+             BROWSER_VIEW_LIST);
+  ExpectMode("toggle list -> gallery",
+             browser_view_utils::NextMode(BROWSER_VIEW_LIST),
+             BROWSER_VIEW_GALLERY);
+
   browser_view_utils::ListRowPalette selected =
       browser_view_utils::PaletteForListRow(true, 0);
   browser_view_utils::ListRowPalette normal =

@@ -21,8 +21,8 @@ static bool AssignCoverFromRgb565(Book *book, const uint16_t *src, int src_w,
     return false;
 
   const aspect_fit_utils::Placement placement = aspect_fit_utils::FitInsideBox(
-      0, 0, cover_layout::kBrowserCoverThumbWidth,
-      cover_layout::kBrowserCoverThumbHeight, src_w, src_h, false);
+      0, 0, cover_layout::kCoverExtractWidth,
+      cover_layout::kCoverExtractHeight, src_w, src_h, false);
   const int dst_w = placement.width;
   const int dst_h = placement.height;
   const float scale =
@@ -115,9 +115,10 @@ int pdf_extract_cover(Book *book, const std::string &pdfpath) {
   }
 
   const float fit_scale =
-      std::min((float)cover_layout::kBrowserCoverThumbWidth / page_width,
-               (float)cover_layout::kBrowserCoverThumbHeight / page_height);
-  const float render_scale = std::max(0.25f, fit_scale * 2.0f);
+      std::min((float)cover_layout::kCoverExtractWidth / page_width,
+               (float)cover_layout::kCoverExtractHeight / page_height);
+  // Twice the old thumbnail scale, as before: about the extract size.
+  const float render_scale = std::max(0.25f, fit_scale);
   RenderedMuPdfBitmap rendered;
   if (!RenderMuPdfBitmap(ctx, doc, 0, render_scale, &rendered, NULL, NULL, NULL,
                          NULL, NULL) ||

@@ -135,8 +135,10 @@ void DeleteBookController::Delete(bool with_notes) {
     return;
   }
   app_.PrintStatus("DELETE book " + path);
-  if (!cover.empty())
+  if (!cover.empty()) {
     remove(cover.c_str());
+    remove(cover_cache::LargePathFor(cover).c_str());
+  }
   if (with_notes)
     remove((paths::GetAnnotationsDir() + "/" +
             annotation_store_utils::BuildFileName(folder_, file_name_))

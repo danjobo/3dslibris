@@ -31,6 +31,9 @@ public:
   void browser_nextpage();
   void browser_prevpage();
   void LoadVisibleBrowserCoverCaches();
+  // The top screen's large cover: loads it for the selected book (or queues
+  // extracting it) and frees the others'.
+  void PrepareSelectedLargeCover();
   void PrioritizeSelectedBookJobs(Book *selected_book);
   bool HasQueuedJob(app_job_type_t type, Book *book) const;
   void EnqueueJob(app_job_type_t type, Book *book);
@@ -62,6 +65,8 @@ private:
   // X: a short press cycles the theme, holding it on a book offers delete.
   bool x_hold_armed_ = false;
   uint64_t x_down_ms_ = 0;
+  // The book whose large cover was last looked up (once per selection).
+  Book *large_cover_checked_ = nullptr;
   std::string current_folder_name_;
   std::string current_folder_path_;
 

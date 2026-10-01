@@ -2,6 +2,8 @@
 
 #include "ui/theme_colors.h"
 
+#include <string.h>
+
 namespace browser_view_utils {
 
 namespace {
@@ -27,10 +29,14 @@ static unsigned short Rgb565FromU8(float r, float g, float b) {
 } // namespace
 
 int PageSize(BrowserViewMode mode) {
+  if (mode == BROWSER_VIEW_SHELF)
+    return 9;
   return mode == BROWSER_VIEW_LIST ? 7 : 4;
 }
 
 int ColumnCount(BrowserViewMode mode) {
+  if (mode == BROWSER_VIEW_SHELF)
+    return 3;
   return mode == BROWSER_VIEW_LIST ? 1 : 2;
 }
 
@@ -47,19 +53,31 @@ bool ShouldLoadCovers(BrowserViewMode mode) {
 }
 
 const char *Label(BrowserViewMode mode) {
+  if (mode == BROWSER_VIEW_SHELF)
+    return "Shelf";
   return mode == BROWSER_VIEW_LIST ? "List" : "Gallery";
 }
 
 BrowserViewMode ParsePrefValue(const char *value) {
-  if (value && value[0] == 'l' && value[1] == 'i' && value[2] == 's' &&
-      value[3] == 't' && value[4] == '\0') {
+  if (value && strcmp(value, "list") == 0)
     return BROWSER_VIEW_LIST;
-  }
+  if (value && strcmp(value, "shelf") == 0)
+    return BROWSER_VIEW_SHELF;
   return BROWSER_VIEW_GALLERY;
 }
 
 const char *ToPrefValue(BrowserViewMode mode) {
+  if (mode == BROWSER_VIEW_SHELF)
+    return "shelf";
   return mode == BROWSER_VIEW_LIST ? "list" : "gallery";
+}
+
+BrowserViewMode NextMode(BrowserViewMode mode) {
+  if (mode == BROWSER_VIEW_GALLERY)
+    return BROWSER_VIEW_SHELF;
+  if (mode == BROWSER_VIEW_SHELF)
+    return BROWSER_VIEW_LIST;
+  return BROWSER_VIEW_GALLERY;
 }
 
 ListRowPalette PaletteForListRow(bool selected, int colorMode) {

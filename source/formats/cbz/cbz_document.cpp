@@ -33,8 +33,8 @@ bool IsValidCbzBitmap(const CbzBitmap &bitmap) {
 void ComputeCoverThumbSize(const CbzBitmap &bitmap, int *dst_w, int *dst_h) {
   const aspect_fit_utils::Placement placement =
       aspect_fit_utils::FitInsideBox(
-          0, 0, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, bitmap.width, bitmap.height,
+          0, 0, cover_layout::kCoverExtractWidth,
+          cover_layout::kCoverExtractHeight, bitmap.width, bitmap.height,
           false);
   *dst_w = placement.width;
   *dst_h = placement.height;

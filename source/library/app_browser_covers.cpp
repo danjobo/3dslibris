@@ -89,6 +89,34 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
   }
 }
 
+void LibraryController::PrepareSelectedLargeCover() {
+  Book *selected = app_.GetSelectedBook();
+  for (int i = 0; i < app_.BookCount(); i++) {
+    Book *book = app_.books[i];
+    if (book && book != selected && book->largeCoverPixels)
+      book->ReleaseLargeCover();
+  }
+  // Look the file up once per selection, not on every redraw.
+  if (selected == large_cover_checked_)
+    return;
+  if (!selected || selected->IsBrowserFolder() || selected->largeCoverPixels) {
+    large_cover_checked_ = selected;
+    return;
+  }
+  // Until the thumbnail is there, extracting it makes the large one too.
+  if (!selected->coverPixels)
+    return;
+  large_cover_checked_ = selected;
+  const std::string path = BuildBookPath(selected);
+  if (path.empty() || cover_cache::TryLoadLarge(selected, path))
+    return;
+  // A thumbnail cached by an older build: extract the cover again.
+  if (selected->largeCoverAttempts == 0) {
+    EnqueueJob(APP_JOB_EXTRACT_LARGE_COVER, selected);
+    PrioritizeSelectedBookJobs(selected);
+  }
+}
+
 void LibraryController::LoadVisibleBrowserCoverCaches() {
   if (app_.BookCount() <= 0)
     return;

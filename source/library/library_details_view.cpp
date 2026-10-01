@@ -44,17 +44,26 @@ int DrawCover(Text *ts, Book *book,
               const library_theme_utils::LibraryPalette &pal) {
   const library_paint_utils::Surface s =
       library_draw::SurfaceFor(ts, ts->screenleft);
-  if (book->coverPixels && book->coverWidth > 0 && book->coverHeight > 0) {
+  // The large cover when it's loaded, else the grid thumbnail enlarged.
+  const u16 *pixels = book->coverPixels;
+  int src_w = book->coverWidth;
+  int src_h = book->coverHeight;
+  if (book->largeCoverPixels && book->largeCoverWidth > 0 &&
+      book->largeCoverHeight > 0) {
+    pixels = book->largeCoverPixels;
+    src_w = book->largeCoverWidth;
+    src_h = book->largeCoverHeight;
+  }
+  if (pixels && src_w > 0 && src_h > 0) {
     int w = 0;
     int h = 0;
-    library_paint_utils::FitSize(book->coverWidth, book->coverHeight,
-                                 kCoverMaxW, kCoverMaxH, true, &w, &h);
+    library_paint_utils::FitSize(src_w, src_h, kCoverMaxW, kCoverMaxH, true,
+                                 &w, &h);
     const int x = (s.width - w) / 2;
     const int y = kCoverTop;
     library_paint_utils::FillRect(s, x + 3, y + 3, x + w + 3, y + h + 3,
                                   pal.shadow);
-    library_paint_utils::BlitScaled(s, book->coverPixels, book->coverWidth,
-                                    book->coverHeight, x, y, w, h);
+    library_paint_utils::BlitScaled(s, pixels, src_w, src_h, x, y, w, h);
     return y + h + 3;
   }
 

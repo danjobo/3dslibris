@@ -164,6 +164,13 @@ public:
   u16 *coverPixels; //! Owned RGB565 cover thumbnail buffer.
   int coverWidth;
   int coverHeight;
+  //! The same cover at the library's top-screen size; only kept for the
+  //! selected book. Owned.
+  u16 *largeCoverPixels;
+  int largeCoverWidth;
+  int largeCoverHeight;
+  uint8_t largeCoverAttempts; //! Re-extractions tried for a missing one.
+  void ReleaseLargeCover();
   std::string coverImagePath; //! path inside EPUB zip
   uint8_t coverAttempts;      // 0=never tried; incremented on failure; capped at kCoverMaxAttempts
   uint64_t coverRetryAfterMs;

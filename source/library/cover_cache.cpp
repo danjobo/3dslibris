@@ -13,6 +13,7 @@
 
 #include <dirent.h>
 #include <list>
+#include <new>
 #include <set>
 #include <stdint.h>
 #include <stdio.h>
@@ -31,6 +32,7 @@
 #include "formats/mobi/mobi_parser.h"
 #include "formats/pdf/pdf_parser.h"
 #include "formats/common/file_read_utils.h"
+#include "library/library_paint_utils.h"
 #include "shared/cover_decode_utils.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
@@ -47,8 +49,9 @@ namespace {
 static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
 static const std::string &kCoverCacheDir = paths::GetCoverCacheDir();
 static const char *kCoverCacheMagic = "CVR4";
-static const size_t kCoverCacheMaxFiles = 512;
-static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
+// Thumbnails (about 20 KB) plus large top-screen covers (about 78 KB).
+static const size_t kCoverCacheMaxFiles = 1024;
+static const size_t kCoverCacheMaxBytes = 48 * 1024 * 1024;
 
 struct CoverCacheEntry {
   std::string path;
@@ -266,9 +269,122 @@ static std::string BuildCoverCachePath(Book *book,
   return std::string(out);
 }
 
+// "<name>.cvr" -> "<name>_L.cvr": the large cover next to the thumbnail.
+static std::string LargePathFromThumbPath(const std::string &thumb_path) {
+  if (thumb_path.size() < 4)
+    return std::string();
+  return thumb_path.substr(0, thumb_path.size() - 4) + "_L.cvr";
+}
+
+static bool WriteCoverFile(const std::string &path, const u16 *pixels, int w,
+                           int h) {
+  FILE *fp = fopen(path.c_str(), "wb");
+  if (!fp)
+    return false;
+  u8 header[8];
+  // Bump the cache magic when extractor heuristics change so stale MOBI
+  // thumbnails do not mask newer cover fixes.
+  memcpy(header, kCoverCacheMagic, 4);
+  header[4] = (u8)(w & 0xFF);
+  header[5] = (u8)((w >> 8) & 0xFF);
+  header[6] = (u8)(h & 0xFF);
+  header[7] = (u8)((h >> 8) & 0xFF);
+  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  const size_t count = (size_t)w * (size_t)h;
+  if (ok)
+    ok = fwrite(pixels, sizeof(u16), count, fp) == count;
+  fclose(fp);
+  if (!ok)
+    remove(path.c_str());
+  return ok;
+}
+
+// Reads a cover file no larger than max_w x max_h. The caller owns *out.
+static bool ReadCoverFile(const std::string &path, int max_w, int max_h,
+                          u16 **out, int *out_w, int *out_h) {
+  FILE *fp = fopen(path.c_str(), "rb");
+  if (!fp)
+    return false;
+  u8 header[8];
+  bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header) &&
+            memcmp(header, kCoverCacheMagic, 4) == 0;
+  const int w = ok ? ((int)header[4] | ((int)header[5] << 8)) : 0;
+  const int h = ok ? ((int)header[6] | ((int)header[7] << 8)) : 0;
+  if (!ok || w <= 0 || h <= 0 || w > max_w || h > max_h) {
+    fclose(fp);
+    return false;
+  }
+  const size_t count = (size_t)w * (size_t)h;
+  u16 *pixels = new (std::nothrow) u16[count];
+  if (!pixels || fread(pixels, sizeof(u16), count, fp) != count) {
+    delete[] pixels;
+    fclose(fp);
+    return false;
+  }
+  fclose(fp);
+  *out = pixels;
+  *out_w = w;
+  *out_h = h;
+  return true;
+}
+
+// Moves a cover bigger than the thumbnail into the book's large cover and
+// puts an averaged-down thumbnail in its place.
+static bool SplitLargeCover(Book *book) {
+  int w = 0;
+  int h = 0;
+  library_paint_utils::FitSize(book->coverWidth, book->coverHeight,
+                               cover_layout::kBrowserCoverThumbWidth,
+                               cover_layout::kBrowserCoverThumbHeight, false,
+                               &w, &h);
+  if (w <= 0 || h <= 0)
+    return false;
+  u16 *thumb = new (std::nothrow) u16[(size_t)w * (size_t)h];
+  if (!thumb)
+    return false;
+  library_paint_utils::Surface surface;
+  surface.pixels = thumb;
+  surface.stride = w;
+  surface.width = w;
+  surface.height = h;
+  library_paint_utils::BlitScaled(surface, book->coverPixels, book->coverWidth,
+                                  book->coverHeight, 0, 0, w, h);
+  book->ReleaseLargeCover();
+  book->largeCoverPixels = book->coverPixels;
+  book->largeCoverWidth = book->coverWidth;
+  book->largeCoverHeight = book->coverHeight;
+  book->coverPixels = thumb;
+  book->coverWidth = w;
+  book->coverHeight = h;
+  return true;
+}
+
 } // namespace
 
 namespace cover_cache {
+
+std::string LargePathFor(const std::string &thumb_path) {
+  return LargePathFromThumbPath(thumb_path);
+}
+
+bool TryLoadLarge(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+  EnsureCoverCacheDirs();
+  const std::string path =
+      LargePathFromThumbPath(BuildCoverCachePath(book, book_path));
+  u16 *pixels = NULL;
+  int w = 0;
+  int h = 0;
+  if (!ReadCoverFile(path, cover_layout::kCoverExtractWidth,
+                     cover_layout::kCoverExtractHeight, &pixels, &w, &h))
+    return false;
+  book->ReleaseLargeCover();
+  book->largeCoverPixels = pixels;
+  book->largeCoverWidth = w;
+  book->largeCoverHeight = h;
+  return true;
+}
 
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
@@ -317,30 +433,23 @@ bool Save(Book *book, const std::string &book_path) {
       book->coverHeight <= 0) {
     return false;
   }
-  if (book->coverWidth > cover_layout::kBrowserCoverThumbWidth ||
-      book->coverHeight > cover_layout::kBrowserCoverThumbHeight)
+  if (book->coverWidth > cover_layout::kCoverExtractWidth ||
+      book->coverHeight > cover_layout::kCoverExtractHeight)
     return false;
 
   EnsureCoverCacheDirs();
   std::string cache_path = BuildCoverCachePath(book, book_path);
-  FILE *fp = fopen(cache_path.c_str(), "wb");
-  if (!fp)
-    return false;
-
-  u8 header[8];
-  // Bump the cache magic when extractor heuristics change so stale MOBI
-  // thumbnails do not mask newer cover fixes.
-  memcpy(header, kCoverCacheMagic, 4);
-  header[4] = (u8)(book->coverWidth & 0xFF);
-  header[5] = (u8)((book->coverWidth >> 8) & 0xFF);
-  header[6] = (u8)(book->coverHeight & 0xFF);
-  header[7] = (u8)((book->coverHeight >> 8) & 0xFF);
-  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
-  size_t count = (size_t)book->coverWidth * (size_t)book->coverHeight;
-  if (ok) {
-    ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
+  // Extractors produce the top-screen size: keep that as its own file and
+  // store the averaged-down thumbnail for the grid.
+  if (book->coverWidth > cover_layout::kBrowserCoverThumbWidth ||
+      book->coverHeight > cover_layout::kBrowserCoverThumbHeight) {
+    if (!SplitLargeCover(book))
+      return false;
+    WriteCoverFile(LargePathFromThumbPath(cache_path), book->largeCoverPixels,
+                   book->largeCoverWidth, book->largeCoverHeight);
   }
-  fclose(fp);
+  const bool ok = WriteCoverFile(cache_path, book->coverPixels,
+                                 book->coverWidth, book->coverHeight);
   if (ok) {
     FILE *mf = fopen(paths::GetCoverCacheManifest().c_str(), "a");
     if (mf) {
