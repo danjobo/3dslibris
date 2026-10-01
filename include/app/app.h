@@ -293,6 +293,8 @@ public:
   void ShowBookInfoView();
   void ShowSyncView();
   void RunSyncFrame(const FrameInput &input);
+  // Books were added on disk (sync); rescan when the library is next shown.
+  void RequestLibraryRescan() { pending_library_rescan_ = true; }
   bool BookNeedsRelayout(Book *book) const;
   size_t PauseBrowserJobs();
   void LoadVisibleBrowserCoverCaches();
@@ -411,6 +413,7 @@ private:
   LightLock status_log_lock_;
   bool pending_boot_reopen_;
   bool skip_next_browser_present_;
+  bool pending_library_rescan_;
   AppLifecycleState lifecycle_state_;
 
   void InitScreens();

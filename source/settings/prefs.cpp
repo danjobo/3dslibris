@@ -522,6 +522,22 @@ void Prefs::RememberSavedBookState(
   ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
 }
 
+void Prefs::ApplySyncedBookPages(const char *folder, const char *filename,
+                                 int page,
+                                 const std::vector<uint16_t> &bookmarks) {
+  if (!filename || !filename[0])
+    return;
+  SavedBookState state;
+  const SavedBookState *existing =
+      ::FindSavedBookState(saved_state_by_book_key, folder, filename);
+  if (existing)
+    state = *existing;
+  if (page >= 0)
+    state.position = page + 1;
+  state.bookmarks = bookmarks;
+  ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
+}
+
 void Prefs::BeginSavedBookBookmarks(const char *folder, const char *filename) {
   saved_bookmarks_key = MakeSavedBookKey(folder, filename);
 }

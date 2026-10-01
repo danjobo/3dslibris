@@ -10,7 +10,9 @@
     A session: both sides send HELLO (protocol version, pairing code, console
     id, display name) and MANIFEST; each merges the other's manifest into
     its own books. Missing books are then fetched with BOOK_REQUEST /
-    FILE_CHUNK / FILE_END. DONE ends the session, ABORT cancels it.
+    FILE_CHUNK / FILE_END. DONE (sent when a side has finished its own
+    requests) ends the session once both sides sent it; ABORT cancels it;
+    PING keeps an idle connection from timing out.
 */
 
 #pragma once
@@ -35,6 +37,7 @@ enum MessageType : uint8_t {
   kFileEnd = 5,
   kDone = 6,
   kAbort = 7,
+  kPing = 8, // keep-alive while a side is choosing books
 };
 
 struct Frame {
@@ -87,5 +90,11 @@ std::string EncodeFileChunk(const std::string &sync_id, uint64_t offset,
                             uint64_t total, const std::string &data);
 bool DecodeFileChunk(const std::string &payload, std::string *sync_id,
                      uint64_t *offset, uint64_t *total, std::string *data);
+
+// FILE_END: sync id and whether the whole file was sent.
+enum FileEndStatus : uint32_t { kFileComplete = 0, kFileUnavailable = 1 };
+std::string EncodeFileEnd(const std::string &sync_id, FileEndStatus status);
+bool DecodeFileEnd(const std::string &payload, std::string *sync_id,
+                   FileEndStatus *status);
 
 } // namespace sync_protocol

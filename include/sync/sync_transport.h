@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string>
 
@@ -27,6 +28,8 @@ public:
   // Queues bytes for sending (sent during Poll).
   virtual void Send(const std::string &bytes) = 0;
   virtual bool SendQueueEmpty() const = 0;
+  // Bytes queued but not yet sent (used to pace file transfers).
+  virtual size_t QueuedBytes() const = 0;
   // Returns and clears the bytes received so far.
   virtual std::string TakeReceived() = 0;
   virtual std::string Error() const = 0;

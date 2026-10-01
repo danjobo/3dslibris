@@ -93,8 +93,12 @@ Syncing with another 3DS (Wi-Fi):
   It shows a 4-digit pairing code
 - On the other: the same screen > join a sync, then enter that code
 - Reading positions, bookmarks, highlights and notes are shared for
-  books both consoles have (same file name and size). The most recently
-  read position wins; deletions are synced too
+  books both consoles have (same file name and size), in every folder.
+  The most recently read position wins; deletions are synced too
+- Then each console lists the books only the other one has. A picks a
+  book, Y picks all, START copies them, B copies nothing. Copied books
+  go in the book folder, with their highlights and position
+- B stops a copy; the next sync carries on where it stopped
 - A summary shows what changed. B cancels while waiting
 
 Exporting highlights to Readwise:

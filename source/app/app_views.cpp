@@ -10,6 +10,7 @@
 
 #include "app/app.h"
 #include "app/sync_controller.h"
+#include "app/library_controller.h"
 
 #include <3ds.h>
 
@@ -102,6 +103,11 @@ void App::ShowLibraryView()
   nav_.browser.view_dirty = true;
   skip_next_browser_present_ = true;
   nav_.prefs.layout_notice_pending = false;
+  if (pending_library_rescan_) {
+    // Closes the open book (its progress was saved above).
+    pending_library_rescan_ = false;
+    library_controller_->RebuildRoot();
+  }
 }
 
 void App::ShowSettingsView(bool from_book)

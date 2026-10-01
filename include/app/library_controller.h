@@ -43,6 +43,8 @@ public:
   size_t PauseBrowserJobs();
   bool IsInsideFolder() const;
   Book *RestoreSavedBookSelection(const char *folder, const char *filename);
+  // Rescans the library from the top folder (closes the open book).
+  void RebuildRoot();
 
 private:
   App &app_;
@@ -52,7 +54,6 @@ private:
   std::string current_folder_name_;
   std::string current_folder_path_;
 
-  void RebuildRoot();
   void EnterFolder(Book *folder);
   void LoadFolderPath(const std::string &folder_path,
                       const std::string &folder_name);

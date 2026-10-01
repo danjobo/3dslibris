@@ -46,6 +46,7 @@ public:
   State GetState() const override { return state_; }
   void Send(const std::string &bytes) override { outbox_ += bytes; }
   bool SendQueueEmpty() const override { return outbox_.empty(); }
+  size_t QueuedBytes() const override { return outbox_.size(); }
   std::string TakeReceived() override;
   std::string Error() const override { return error_; }
   std::string PeerName() const override { return peer_name_; }

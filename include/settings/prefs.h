@@ -55,6 +55,10 @@ public:
   void RememberSavedBookBookmark(uint16_t page);
   void EndSavedBookBookmarks();
   void ApplySavedBookState(Book *book) const;
+  // Sync: sets the bookmarks of a book that isn't loaded and moves it to a
+  // 0-based page (page < 0 keeps its position).
+  void ApplySyncedBookPages(const char *folder, const char *filename, int page,
+                            const std::vector<uint16_t> &bookmarks);
   App *GetApp() const { return app; }
   long modtime;
   bool swapshoulder;

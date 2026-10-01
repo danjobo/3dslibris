@@ -181,4 +181,25 @@ bool DecodeFileChunk(const std::string &payload, std::string *sync_id,
   return *offset <= *total && data->size() <= *total - *offset;
 }
 
+std::string EncodeFileEnd(const std::string &sync_id, FileEndStatus status) {
+  std::string out;
+  PutString(&out, sync_id);
+  PutU32(&out, (uint32_t)status);
+  return out;
+}
+
+bool DecodeFileEnd(const std::string &payload, std::string *sync_id,
+                   FileEndStatus *status) {
+  if (!sync_id || !status)
+    return false;
+  size_t pos = 0;
+  if (!GetString(payload, &pos, sync_id) || pos + 4 != payload.size())
+    return false;
+  const uint32_t v = GetU32(payload.data() + pos);
+  if (v > (uint32_t)kFileUnavailable)
+    return false;
+  *status = (FileEndStatus)v;
+  return true;
+}
+
 } // namespace sync_protocol

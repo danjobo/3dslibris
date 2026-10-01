@@ -187,6 +187,7 @@ App::App()
   // Initialize 3DS-specific state and hooks.
   pending_boot_reopen_ = false;
   skip_next_browser_present_ = false;
+  pending_library_rescan_ = false;
 
   bool new3ds = false;
   APT_CheckNew3DS(&new3ds);
