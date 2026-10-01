@@ -80,6 +80,8 @@ Book::Book(const BookContext &c) : ctx(c) {
 
   // Position state / basic rendering
   position = 0;
+  saved_page_count_ = 0;
+  saved_ms_per_page_ = 0;
   last_opened_time = 0;
   coverPixels = nullptr;
   coverWidth = 0;
@@ -696,6 +698,26 @@ void Book::ResetReadingPaceEstimate() {
   reading_pace_ = reading_pace_utils::PaceState();
 }
 
+u16 Book::GetLibraryPageCount() {
+  if (!IsAsyncReflowOpenPending()) {
+    const u16 live = GetPageCount();
+    if (live > 0)
+      return live;
+  }
+  return saved_page_count_;
+}
+
+uint32_t Book::GetLibraryMsPerPage() const {
+  if (HasReadingPaceEstimate())
+    return (uint32_t)reading_pace_.ms_per_page;
+  return saved_ms_per_page_;
+}
+
+void Book::SetSavedLibraryStats(u16 page_count, uint32_t ms_per_page) {
+  saved_page_count_ = page_count;
+  saved_ms_per_page_ = ms_per_page;
+}
+
 bool Book::HasReadingPaceEstimate() const {
   return reading_pace_utils::HasEstimate(reading_pace_);
 }
@@ -799,6 +821,11 @@ void Book::Close() {
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
           (unsigned int)GetPageCount());
+  // Remember the page count and pace for the library before they go.
+  if (!IsAsyncReflowOpenPending() && GetPageCount() > 0)
+    saved_page_count_ = GetPageCount();
+  if (HasReadingPaceEstimate())
+    saved_ms_per_page_ = (uint32_t)reading_pace_.ms_per_page;
   CancelAsyncReflowOpen();
   if (flush_pending_epub_cache) {
     HomeButtonGuard home_guard;

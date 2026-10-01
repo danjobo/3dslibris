@@ -57,9 +57,11 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
     return;
 
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
+    // List view: only the selected book's cover is kept, for the top screen.
     for (int i = 0; i < app_.BookCount(); i++) {
       Book *book = app_.books[i];
-      if (!book || book->IsBrowserFolder() || !book->coverPixels)
+      if (!book || book->IsBrowserFolder() || !book->coverPixels ||
+          book == app_.GetSelectedBook())
         continue;
       delete[] book->coverPixels;
       book->coverPixels = nullptr;
@@ -93,6 +95,15 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
 
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
     UnloadNonVisibleBrowserCoverCaches();
+    // The top screen shows the selected book's cover if it's cached.
+    Book *selected = app_.GetSelectedBook();
+    if (selected && !selected->IsBrowserFolder() && !selected->coverPixels) {
+      const std::string path = BuildBookPath(selected);
+      if (!path.empty() && cover_cache::TryLoad(selected, path)) {
+        selected->coverAttempts = kCoverMaxAttempts;
+        selected->coverRetryAfterMs = 0;
+      }
+    }
     return;
   }
 

@@ -41,6 +41,11 @@ void OnPositionChange(PaceState *state, int prev, int next, int page_count,
 
 bool HasEstimate(const PaceState &state);
 
+// Starts from a pace remembered from an earlier session (ms_per_page 0 does
+// nothing), so the estimate shows right away when the book is reopened. It
+// counts as an established estimate; new pages keep refining it.
+void Seed(PaceState *state, uint32_t ms_per_page);
+
 // Minutes to read remaining_pages at the estimated pace (at least 1), 0 when
 // nothing remains, -1 without an estimate.
 int RemainingMinutes(const PaceState &state, int remaining_pages);

@@ -107,7 +107,12 @@ void Book::PrepareForOpen() {
   Text *text = GetText();
   if (text)
     text->SetStyle(TEXT_STYLE_REGULAR);
+  // Keep the pace across a relayout, and pick up the one from earlier
+  // sessions, so time left shows right away.
+  if (HasReadingPaceEstimate())
+    saved_ms_per_page_ = (uint32_t)reading_pace_.ms_per_page;
   ResetReadingPaceEstimate();
+  reading_pace_utils::Seed(&reading_pace_, saved_ms_per_page_);
   ClearOpenAbortRequest();
   open_cancel_poll::Reset();
   tocResolveTried = false;

@@ -53,6 +53,8 @@
 #include "library/browser_presentation_utils.h"
 #include "library/browser_view_utils.h"
 #include "library/browser_warmup_utils.h"
+#include "library/library_details_view.h"
+#include "library/library_draw.h"
 #include "shared/debug_runtime_mode.h"
 #include "shared/string_utils.h"
 #include "settings/prefs.h"
@@ -308,7 +310,8 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
       return;
     app_.SetBrowserPageStart(state.page_start);
     app_.SetSelectedBook(app_.books[state.selected_index]);
-    if (app_.GetBrowserPageStart() != old_page_start)
+    if (app_.GetBrowserPageStart() != old_page_start ||
+        CurrentBrowserViewMode(app_) == BROWSER_VIEW_LIST)
       LoadVisibleBrowserCoverCaches();
     if (app_.GetSelectedBook() != old_selected) {
       g_marquee.Reset();
@@ -410,6 +413,8 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
           OpenSelectedBrowserEntry();
         } else {
           app_.SetSelectedBook(app_.books[book_idx]);
+          if (CurrentBrowserViewMode(app_) == BROWSER_VIEW_LIST)
+            LoadVisibleBrowserCoverCaches();
           g_marquee.Reset();
           PrioritizeSelectedBookJobs(app_.GetSelectedBook());
           app_.SetBrowserLastInteractionMs(osGetTime());
@@ -512,8 +517,13 @@ void LibraryController::browser_draw(void) {
 
   app_.ts->SetScreen(app_.ts->screenleft);
   app_.ts->SetStyle(TEXT_STYLE_BROWSER);
-  app_.ts->PrintSplash(app_.ts->screenleft);
-  {
+  Book *selected = app_.GetSelectedBook();
+  if (selected) {
+    // Top screen: the selected book's cover and reading progress.
+    app_.DrawTopGradientBackground();
+    library_details_view::Draw(app_.ts.get(), selected);
+  } else {
+    app_.ts->PrintSplash(app_.ts->screenleft);
     char versionMsg[16];
     snprintf(versionMsg, sizeof(versionMsg), "v%s", VERSION);
     const int versionWidth =
@@ -522,8 +532,8 @@ void LibraryController::browser_draw(void) {
     if (versionX < 0)
       versionX = 0;
     app_.ts->SetPixelSize(10);
-  app_.ts->SetPen(versionX, 57);
-  app_.ts->PrintString(versionMsg);
+    app_.ts->SetPen(versionX, 57);
+    app_.ts->PrintString(versionMsg);
   }
 
   app_.ts->SetScreen(app_.ts->screenright);
@@ -535,10 +545,13 @@ void LibraryController::browser_draw(void) {
 
   BrowserDrawContext ctx{app_.ts.get(), &app_.books, app_.GetSelectedBook(),
                          &app_.buttons};
-  if (view_mode == BROWSER_VIEW_LIST)
-    browser_list_view::DrawPage(ctx, app_.GetBrowserPageStart(), page_size);
-  else
-    browser_grid_view::DrawPage(ctx, g_marquee, app_.GetBrowserPageStart());
+  {
+    library_draw::TextStateGuard guard(app_.ts.get());
+    if (view_mode == BROWSER_VIEW_LIST)
+      browser_list_view::DrawPage(ctx, app_.GetBrowserPageStart(), page_size);
+    else
+      browser_grid_view::DrawPage(ctx, g_marquee, app_.GetBrowserPageStart());
+  }
 
   app_.ts->SetPixelSize(savedPixelSize);
 

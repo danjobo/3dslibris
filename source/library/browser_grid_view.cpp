@@ -4,11 +4,12 @@
 
 #include "book/book.h"
 #include "shared/debug_log.h"
-#include "library/browser_grid_geometry_utils.h"
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
 #include "library/browser_view_utils.h"
-#include "ui/button.h"
+#include "library/library_draw.h"
+#include "library/library_paint_utils.h"
+#include "library/library_theme_utils.h"
 #include "ui/text.h"
 
 BrowserGridMarqueeState::BrowserGridMarqueeState()
@@ -41,6 +42,8 @@ int HitTestBookIndex(int x, int y, int page_start, int book_count) {
 void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
               int page_start) {
   const int book_count = (int)ctx.books->size();
+  const library_theme_utils::LibraryPalette pal =
+      library_theme_utils::ForColorMode(ctx.ts->GetColorMode());
   for (int i = page_start;
        i < book_count && i < page_start + kPageCapacity; i++) {
     int page_idx = i % kPageCapacity;
@@ -49,53 +52,55 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
     int btnX = kGridX0 + col * kCellW;
     int btnY = kGridY0 + row * kCellH;
 
-    (*ctx.buttons)[i]->Draw(ctx.ts->screenright,
-                            (*ctx.books)[i] == ctx.selected_book);
+    Book *book = (*ctx.books)[i];
+    const bool is_selected = book == ctx.selected_book;
+    const library_paint_utils::Surface surface =
+        library_draw::SurfaceFor(ctx.ts, ctx.ts->screenright);
+    const int box_x = btnX + kCoverOffsetX;
+    const int box_y = btnY + kCoverOffsetY;
+    const bool has_cover = book->coverPixels != NULL &&
+                           book->coverWidth > 0 && book->coverHeight > 0;
 
-    const bool has_cover = (*ctx.books)[i]->coverPixels != NULL;
+    // The cover sits on the bottom of its box, centered, like a book on a
+    // shelf. Books without one get a plain box with the title inside.
+    int img_w = kCoverW;
+    int img_h = kCoverH;
+    if (has_cover)
+      library_paint_utils::FitSize(book->coverWidth, book->coverHeight,
+                                   kCoverW, kCoverH, true, &img_w, &img_h);
+    const int img_x = box_x + (kCoverW - img_w) / 2;
+    const int img_y = box_y + (kCoverH - img_h);
 
+    library_paint_utils::FillRect(surface, img_x + 2, img_y + 2,
+                                  img_x + img_w + 2, img_y + img_h + 2,
+                                  pal.shadow);
     if (has_cover) {
-      const int inner_pad_x = 4;
-      const int inner_pad_y = 4;
-      const int inner_w = kCoverW - inner_pad_x * 2;
-      const int inner_h = kCoverH - inner_pad_y * 2;
-      int draw_w = 0;
-      int draw_h = 0;
-      browser_grid_geometry_utils::FitRectPreserveAspect(
-          (*ctx.books)[i]->coverWidth, (*ctx.books)[i]->coverHeight, inner_w,
-          inner_h, &draw_w, &draw_h);
-      int cx = btnX + 2 + inner_pad_x + (inner_w - draw_w) / 2;
-      int cy = btnY + 2 + inner_pad_y + (inner_h - draw_h) / 2;
-      int w = ctx.ts->display.height;
-      ctx.ts->MarkScreenDirtyRect(ctx.ts->screenright, cx, cy,
-                                  cx + draw_w, cy + draw_h);
-      for (int py = 0; py < draw_h && (cy + py) < 320; py++) {
-        const int src_y =
-            (int)((long long)py * (long long)(*ctx.books)[i]->coverHeight /
-                  (long long)draw_h);
-        for (int px = 0; px < draw_w && (cx + px) < 240; px++) {
-          const int src_x =
-              (int)((long long)px * (long long)(*ctx.books)[i]->coverWidth /
-                    (long long)draw_w);
-          if (!browser_grid_geometry_utils::RoundedRectContains(
-                  px, py, draw_w, draw_h, 5))
-            continue;
-          ctx.ts->screenright[(cy + py) * w + (cx + px)] =
-              (*ctx.books)[i]
-                  ->coverPixels[src_y * (*ctx.books)[i]->coverWidth + src_x];
-        }
-      }
+      library_paint_utils::BlitScaled(surface, book->coverPixels,
+                                      book->coverWidth, book->coverHeight,
+                                      img_x, img_y, img_w, img_h);
+    } else {
+      library_paint_utils::FillRect(surface, img_x, img_y, img_x + img_w,
+                                    img_y + img_h, pal.placeholder);
+    }
+    if (is_selected) {
+      library_paint_utils::FrameRect(surface, img_x - 4, img_y - 4,
+                                     img_x + img_w + 4, img_y + img_h + 4, 2,
+                                     pal.accent);
+    }
+    ctx.ts->MarkScreenDirtyRect(ctx.ts->screenright, img_x - 4, img_y - 4,
+                                img_x + img_w + 4, img_y + img_h + 4);
+
+    if (!book->IsBrowserFolder()) {
+      const library_progress_utils::BookProgress progress =
+          library_draw::ProgressFor(book);
+      library_draw::DrawProgressBar(ctx.ts, ctx.ts->screenright, img_x,
+                                    btnY + kBarOffsetY, img_w, kBarH,
+                                    progress.percent, pal);
+      library_draw::DrawStatusBadge(ctx.ts, ctx.ts->screenright, img_x, img_y,
+                                    img_x + img_w, progress, pal);
     }
 
-    if ((*ctx.books)[i] == ctx.selected_book) {
-      ctx.ts->DrawRect(btnX - 2, btnY - 2, btnX + kCellW + 2, btnY + kCellH + 2,
-                       0xF800);
-      ctx.ts->DrawRect(btnX - 3, btnY - 3, btnX + kCellW + 3, btnY + kCellH + 3,
-                       0xF800);
-      ctx.ts->SetStyle(TEXT_STYLE_BOLD);
-    } else {
-      ctx.ts->SetStyle(TEXT_STYLE_REGULAR);
-    }
+    ctx.ts->SetStyle(TEXT_STYLE_BROWSER);
 
     ctx.ts->SetPixelSize(10);
     std::string display_name =
@@ -105,10 +110,8 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         const char *dname = display_name.c_str();
         unsigned char cur_style = (unsigned char)ctx.ts->GetStyle();
         int full_w = (int)ctx.ts->GetStringWidth(dname, cur_style);
-        Book *book_i = (*ctx.books)[i];
-        Book *sel = ctx.selected_book;
+        Book *book_i = book;
         bool overflows = full_w > kCellW;
-        bool is_selected = book_i == sel;
 
         int saved_margin_right = ctx.ts->margin.right;
         bool saved_clip = ctx.ts->IsClipToContentEnabled();
@@ -211,7 +214,8 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         }
 
         if (!(is_selected && overflows)) {
-          ctx.ts->SetPen(btnX, btnY + kTitleOffsetY);
+          const int title_x = overflows ? btnX : btnX + (kCellW - full_w) / 2;
+          ctx.ts->SetPen(title_x, btnY + kTitleOffsetY);
           ctx.ts->PrintString(dname, cur_style);
         }
 
@@ -220,43 +224,21 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         ctx.ts->SetAutoWrapEnabled(saved_wrap);
       }
     } else {
-      const int inner_pad_x = 4;
-      const int inner_pad_y = 4;
-      const int cover_x = btnX + 2;
-      const int cover_y = btnY + 2;
-      const int fill_x = cover_x + inner_pad_x;
-      const int fill_y = cover_y + inner_pad_y;
-      const int fill_w = kCoverW - inner_pad_x * 2;
-      const int fill_h = kCoverH - inner_pad_y * 2;
-      const browser_view_utils::ListRowPalette palette =
-          browser_view_utils::PaletteForListRow(
-              false, ctx.ts->GetColorMode());
-      const unsigned short fill = palette.fill;
-      const int stride = ctx.ts->display.height;
-      ctx.ts->MarkScreenDirtyRect(ctx.ts->screenright, fill_x, fill_y,
-                                  fill_x + fill_w, fill_y + fill_h);
-      for (int py = 0; py < fill_h && (fill_y + py) < 320; py++) {
-        for (int px = 0; px < fill_w && (fill_x + px) < 240; px++) {
-          if (!browser_grid_geometry_utils::RoundedRectContains(
-                  px, py, fill_w, fill_h, 5))
-            continue;
-          ctx.ts->screenright[(fill_y + py) * stride + (fill_x + px)] = fill;
+      browser_presentation_utils::DrawWrappedTitleInsideCover(
+          ctx.ts, display_name, img_x, img_y, img_w, img_h,
+          TEXT_STYLE_BROWSER);
+      // The title is on the box already; the author goes underneath.
+      if (!book->IsBrowserFolder() && !book->GetAuthor().empty()) {
+        const std::vector<std::string> author = library_draw::WrapLines(
+            ctx.ts, book->GetAuthor(), TEXT_STYLE_BROWSER, kCellW, 1);
+        if (!author.empty()) {
+          ctx.ts->SetTextColorOverride(pal.muted);
+          library_draw::PrintCentered(ctx.ts, author[0], TEXT_STYLE_BROWSER,
+                                      btnX, btnX + kCellW,
+                                      btnY + kTitleOffsetY);
+          ctx.ts->ClearTextColorOverride();
         }
       }
-      browser_presentation_utils::DrawWrappedTitleInsideCover(
-          ctx.ts, display_name, cover_x, cover_y, kCoverW, kCoverH,
-          TEXT_STYLE_BROWSER);
-    }
-
-    if (!(*ctx.books)[i]->IsBrowserFolder()) {
-      int pos = (*ctx.books)[i]->GetPosition();
-      char msg[16];
-      if (pos > 0)
-        snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
-      else
-        snprintf(msg, sizeof(msg), "NEW");
-      ctx.ts->SetPen(btnX, btnY + kProgressOffsetY);
-      ctx.ts->PrintString(msg);
     }
   }
 }

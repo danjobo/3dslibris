@@ -46,6 +46,14 @@ bool HasEstimate(const PaceState &state) {
   return state.samples >= kMinSamples && state.ms_per_page > 0.0f;
 }
 
+void Seed(PaceState *state, uint32_t ms_per_page) {
+  if (!state || ms_per_page == 0)
+    return;
+  state->ms_per_page = (float)ms_per_page;
+  if (state->samples < kMinSamples)
+    state->samples = kMinSamples;
+}
+
 int RemainingMinutes(const PaceState &state, int remaining_pages) {
   if (remaining_pages <= 0)
     return 0;

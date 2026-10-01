@@ -185,6 +185,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     int style_publisher_text_indent = -1;
     int style_publisher_block_margins = -1;
     uint32_t last_opened = 0;
+    int page_count = 0;
+    uint32_t ms_per_page = 0;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
         snprintf(filename, sizeof(filename), "%s", attr[i + 1]);
@@ -206,6 +208,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         style_publisher_block_margins = atoi(attr[i + 1]) != 0 ? 1 : 0;
       if (!strcmp(attr[i], "lastOpened"))
         last_opened = (uint32_t)atol(attr[i + 1]);
+      if (!strcmp(attr[i], "pages"))
+        page_count = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "pace"))
+        ms_per_page = (uint32_t)atol(attr[i + 1]);
       if (!strcmp(attr[i], "current")) {
         // Should warn if multiple books are current...
         // the last current book will win.
@@ -222,6 +228,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           style_font_size, style_line_spacing,
           style_paragraph_spacing, style_publisher_text_indent,
           style_publisher_block_margins, last_opened);
+      p->prefs->RememberSavedBookLibraryStats(folder, filename, page_count,
+                                              ms_per_page);
       p->prefs->BeginSavedBookBookmarks(folder, filename);
     }
 
@@ -258,6 +266,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
       if (last_opened > 0)
         matched->SetLastOpenedTime(last_opened);
+      p->prefs->ApplySavedLibraryStats(matched);
       DBG_LOGF(app, "recently-opened: read lastOpened=%lu matched=%s file=\"%s\"",
                (unsigned long)last_opened,
                matched ? "yes" : "no",
@@ -500,6 +509,7 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
     matched->SetPosition(pending_current_position - 1);
   for (size_t i = 0; i < pending_current_bookmarks.size(); i++)
     matched->GetBookmarks().push_back(pending_current_bookmarks[i]);
+  ApplySavedLibraryStats(matched);
 
   app->SetCurrentBook(matched);
   app->SetSelectedBook(matched);
@@ -524,6 +534,27 @@ void Prefs::RememberSavedBookState(
   state.style_publisher_block_margins = style_publisher_block_margins;
   state.last_opened = last_opened;
   ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
+}
+
+void Prefs::RememberSavedBookLibraryStats(const char *folder,
+                                          const char *filename,
+                                          int page_count,
+                                          uint32_t ms_per_page) {
+  SavedBookState *state =
+      ::FindSavedBookState(&saved_state_by_book_key, folder, filename);
+  if (!state)
+    return;
+  state->page_count = page_count > 0 && page_count <= 0xFFFF ? page_count : 0;
+  state->ms_per_page = ms_per_page;
+}
+
+void Prefs::ApplySavedLibraryStats(Book *book) const {
+  if (!book)
+    return;
+  const SavedBookState *state = ::FindSavedBookState(
+      saved_state_by_book_key, book->GetFolderName(), book->GetFileName());
+  if (state && (state->page_count > 0 || state->ms_per_page > 0))
+    book->SetSavedLibraryStats((u16)state->page_count, state->ms_per_page);
 }
 
 void Prefs::ForgetBook(const char *folder, const char *filename) {
@@ -589,6 +620,8 @@ void Prefs::ApplySavedBookState(Book *book) const {
       book->SetLastOpenedTime(state.last_opened);
     for (size_t i = 0; i < state.bookmarks.size(); i++)
       book->GetBookmarks().push_back(state.bookmarks[i]);
+    if (state.page_count > 0 || state.ms_per_page > 0)
+      book->SetSavedLibraryStats((u16)state.page_count, state.ms_per_page);
   }
 
   const auto it =
@@ -706,6 +739,8 @@ int Prefs::Write() {
     state.style_publisher_block_margins =
         book->GetStylePublisherBlockMarginsOverride();
     state.last_opened = book->GetLastOpenedTime();
+    state.page_count = book->GetLibraryPageCount();
+    state.ms_per_page = book->GetLibraryMsPerPage();
     const std::list<u16> &bookmarks = book->GetBookmarks();
     for (std::list<u16>::const_iterator j = bookmarks.begin();
          j != bookmarks.end(); ++j)
@@ -749,6 +784,10 @@ int Prefs::Write() {
       DBG_LOGF(app, "recently-opened: write lastOpened=%lu for \"%s\"",
                (unsigned long)state.last_opened, filename.c_str());
     }
+    if (state.page_count > 0)
+      fprintf(fp, " pages=\"%d\"", state.page_count);
+    if (state.ms_per_page > 0)
+      fprintf(fp, " pace=\"%lu\"", (unsigned long)state.ms_per_page);
     if (it->first == current_book_key)
       fprintf(fp, " current=\"1\"");
 #ifdef DSLIBRIS_DEBUG

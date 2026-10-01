@@ -37,8 +37,13 @@ static const int kCoverW = cover_layout::kBrowserCoverThumbWidth;
 static const int kCoverH = cover_layout::kBrowserCoverThumbHeight;
 static const int kCellW = 115;
 static const int kCellH = 144;
-static const int kTitleOffsetY = kCoverH + 10;
-static const int kProgressOffsetY = kCoverH + 22;
+// Cover box inside a cell: centered, 2px from the top.
+static const int kCoverOffsetX = (kCellW - kCoverW) / 2;
+static const int kCoverOffsetY = 2;
+// Progress bar under the cover box, then the title's baseline.
+static const int kBarOffsetY = kCoverOffsetY + kCoverH + 5;
+static const int kBarH = 3;
+static const int kTitleOffsetY = kBarOffsetY + kBarH + 13;
 static const int kGridX0 = 5;
 static const int kGridY0 = 3;
 

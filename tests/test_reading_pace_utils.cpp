@@ -107,6 +107,24 @@ void TestSampleBounds() {
                  0);
 }
 
+void TestSeedGivesImmediateEstimate() {
+  PaceState s;
+  reading_pace_utils::Seed(&s, 0);
+  test::ExpectFalse("seeding with no pace does nothing",
+                    reading_pace_utils::HasEstimate(s));
+  reading_pace_utils::Seed(&s, 60000);
+  test::ExpectTrue("seeded pace is an estimate",
+                   reading_pace_utils::HasEstimate(s));
+  test::ExpectEq("ten pages at a minute each",
+                 reading_pace_utils::RemainingMinutes(s, 10), 10);
+
+  // New pages keep refining a seeded estimate.
+  uint32_t now = 100000;
+  ReadForward(&s, 10, 6, 30000, &now);
+  test::ExpectLt("faster reading lowers the seeded pace",
+                 (int)s.ms_per_page, 60000);
+}
+
 } // namespace
 
 int main() {
@@ -115,5 +133,6 @@ int main() {
   TestJumpsDoNotSample();
   TestRepaginationResetsFrontier();
   TestSampleBounds();
+  TestSeedGivesImmediateEstimate();
   return 0;
 }

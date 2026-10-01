@@ -108,6 +108,10 @@ private:
   bool browser_folder_entry;
   int position;             //! as page index.
   reading_pace_utils::PaceState reading_pace_; //! Time-remaining estimate.
+  //! Page count and pace (ms per page) from the last time the book was open,
+  //! kept in prefs so the library can show progress while it's closed.
+  u16 saved_page_count_;
+  uint32_t saved_ms_per_page_;
   uint32_t last_opened_time; //! Unix timestamp of last open; 0 if never opened.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
@@ -377,6 +381,11 @@ public:
   void ResetReadingPaceEstimate();
   bool HasReadingPaceEstimate() const;
   int EstimateRemainingBookMinutes() const;
+  //! For the library: the live page count and pace while the book is open,
+  //! otherwise the ones remembered from when it was last open (0 = unknown).
+  u16 GetLibraryPageCount();
+  uint32_t GetLibraryMsPerPage() const;
+  void SetSavedLibraryStats(u16 page_count, uint32_t ms_per_page);
   int EstimateRemainingChapterMinutes() const;
   void SetTitle(const char *title);
   Page *AppendPage();

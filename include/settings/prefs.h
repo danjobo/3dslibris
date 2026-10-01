@@ -55,6 +55,10 @@ public:
   void RememberSavedBookBookmark(uint16_t page);
   void EndSavedBookBookmarks();
   void ApplySavedBookState(Book *book) const;
+  // Library stats (page count, pace) for a <book> entry being read.
+  void RememberSavedBookLibraryStats(const char *folder, const char *filename,
+                                     int page_count, uint32_t ms_per_page);
+  void ApplySavedLibraryStats(Book *book) const;
   // A deleted book: drop its saved page, bookmarks and last-opened time.
   void ForgetBook(const char *folder, const char *filename);
   // Sync: sets the bookmarks of a book that isn't loaded and moves it to a

@@ -4,7 +4,11 @@
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
 #include "library/browser_view_utils.h"
+#include "library/library_draw.h"
+#include "library/library_theme_utils.h"
 #include "ui/text.h"
+
+#include <stdio.h>
 
 namespace browser_list_view {
 
@@ -17,6 +21,8 @@ int HitTestBookIndex(int x, int y, int page_start, int book_count,
 
 void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
   const int book_count = (int)ctx.books->size();
+  const library_theme_utils::LibraryPalette pal =
+      library_theme_utils::ForColorMode(ctx.ts->GetColorMode());
   for (int i = page_start; i < book_count && i < page_start + page_size; i++) {
     const int row = i - page_start;
     const int row_x = kRowX;
@@ -43,14 +49,28 @@ void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
         ctx.ts->GetStyle());
 
     if (!(*ctx.books)[i]->IsBrowserFolder()) {
-      int pos = (*ctx.books)[i]->GetPosition();
-      char msg[16];
-      if (pos > 0)
-        snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
-      else
-        snprintf(msg, sizeof(msg), "NEW");
-      ctx.ts->SetPen(progress_x, row_y + 14);
-      ctx.ts->PrintString(msg);
+      Book *book = (*ctx.books)[i];
+      const library_progress_utils::BookProgress progress =
+          library_draw::ProgressFor(book);
+      const int right = row_x + kRowW - 6;
+      const int col_w = 36;
+      if (progress.is_new || progress.finished) {
+        library_draw::DrawStatusBadge(ctx.ts, ctx.ts->screenright, right - col_w,
+                                      row_y + 8, right + 3, progress, pal);
+      } else {
+        char msg[16];
+        if (progress.percent >= 0)
+          snprintf(msg, sizeof(msg), "%d%%", progress.percent);
+        else
+          snprintf(msg, sizeof(msg), "Pg %d", book->GetPosition() + 1);
+        ctx.ts->SetPixelSize(10);
+        const int msg_w = ctx.ts->GetStringWidth(msg, TEXT_STYLE_BROWSER);
+        ctx.ts->SetPen((u16)(right - msg_w), (u16)(row_y + 16));
+        ctx.ts->PrintString(msg, TEXT_STYLE_BROWSER);
+        library_draw::DrawProgressBar(ctx.ts, ctx.ts->screenright,
+                                      right - col_w, row_y + 22, col_w, 3,
+                                      progress.percent, pal);
+      }
     }
     ctx.ts->ClearTextColorOverride();
   }
