@@ -25,7 +25,6 @@
 #include "app/settings_controller.h"
 #include "book/book.h"
 #include "book/book_renderer.h"
-#include "book/readwise_export.h"
 #include "library/browser_view_utils.h"
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
@@ -325,7 +324,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins",
-      "export highlights", "sync with another 3DS"};
+      "Readwise", "sync with another 3DS"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -1032,7 +1031,7 @@ void SettingsController::PrefsRefreshButton(int index) {
     break;
   case PREFS_BUTTON_EXPORT_HIGHLIGHTS:
     app_.prefsButtons[PREFS_BUTTON_EXPORT_HIGHLIGHTS].SetLabel2(
-        std::string("all books to Readwise CSV >"));
+        std::string("upload or export highlights >"));
     break;
   case PREFS_BUTTON_CLEAR_CACHE:
     app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("delete all caches >"));
@@ -1313,7 +1312,7 @@ void SettingsController::PrefsHandlePress() {
   }
 
   if (selected_button == PREFS_BUTTON_EXPORT_HIGHLIGHTS) {
-    ExportAllHighlights();
+    app_.ShowReadwiseView();
     return;
   }
 
@@ -1321,24 +1320,6 @@ void SettingsController::PrefsHandlePress() {
     app_.ShowSyncView();
     return;
   }
-}
-
-void SettingsController::ExportAllHighlights() {
-  const readwise_export::Result result =
-      readwise_export::ExportBooks(app_.books);
-  char label[64];
-  if (result.ok)
-    snprintf(label, sizeof(label), "%d from %d book%s -> exports/",
-             result.highlights, result.books, result.books == 1 ? "" : "s");
-  else if (result.highlights == 0)
-    snprintf(label, sizeof(label), "no highlights yet");
-  else
-    snprintf(label, sizeof(label), "export failed (SD card?)");
-  app_.prefsButtons[PREFS_BUTTON_EXPORT_HIGHLIGHTS].SetLabel2(
-      std::string(label));
-  app_.PrintStatus(result.ok ? ("Exported highlights to " + result.path)
-                             : std::string("Highlight export: nothing written"));
-  app_.MarkPrefsDirty();
 }
 
 void App::ToggleCurrentBookMobiLineWrapFix() {

@@ -16,15 +16,13 @@
 #include <unistd.h>
 
 #include "app/app.h"
-#include "app/connection_test.h"
+#include "app/library_files.h"
 #include "app/frame_input.h"
 #include "book/annotation_store_utils.h"
 #include "book/book.h"
 #include "settings/prefs.h"
-#include "shared/app_flow_utils.h"
 #include "shared/console_id.h"
 #include "shared/path_constants.h"
-#include "shared/utf8_utils.h"
 #include "sync/uds_transport.h"
 #include "sync/wifi_transport.h"
 #include "ui/button.h"
@@ -34,8 +32,8 @@
 namespace {
 
 static const u32 kSocBufferSize = 0x100000;
-// host, join, connection type, Readwise connection test
-static const int kMenuOptionCount = 4;
+// host, join, connection type
+static const int kMenuOptionCount = 3;
 static const int kMenuButtonX = 5;
 static const int kMenuButtonY0 = 70;
 static const int kMenuButtonStride = 46;
@@ -71,15 +69,6 @@ bool AskPairingCode(std::string *out) {
     return false;
   *out = buf;
   return out->size() == 4;
-}
-
-bool IsLibraryBook(const char *name) {
-  return app_flow_utils::ShouldIndexBookFilename(name) &&
-         app_flow_utils::DetectBookFormat(name) != FORMAT_UNDEF;
-}
-
-std::string NormalizeName(const std::string &raw) {
-  return utf8_utils::NormalizeFsFilenameForIo(raw);
 }
 
 uint64_t SdFreeBytes(void *) {
@@ -265,12 +254,8 @@ sync_manifest::Manifest SyncController::BuildLocalManifest() {
   if (current)
     current->SaveReadingProgress();
 
-  std::vector<std::string> roots;
-  roots.push_back(app_.bookdir);
-  if (app_.bookdir != paths::kRomfsBookDir)
-    roots.push_back(paths::kRomfsBookDir);
   const std::vector<sync_book_files::LocalBook> files =
-      sync_book_files::ScanLibrary(roots, &IsLibraryBook, &NormalizeName);
+      library_files::ScanAll(app_);
 
   sync_manifest::Manifest manifest;
   library_.clear();
@@ -319,7 +304,8 @@ void SyncController::StartSession() {
   for (size_t i = 0; i < library_.size(); i++)
     files.push_back(library_[i].file);
   source_.reset(new FileBookSource(files));
-  sink_.reset(new FileBookSink(dest, &IsLibraryBook, &SdFreeBytes, NULL));
+  sink_.reset(new FileBookSink(dest, &library_files::IsLibraryBook,
+                               &SdFreeBytes, NULL));
   session_.reset(new SyncSession(pairing_code_, console_id::Get(),
                                  DeviceName(), manifest, transport_.get(),
                                  source_.get(), sink_.get()));
@@ -485,26 +471,6 @@ void SyncController::BuildSummary() {
   }
 }
 
-void SyncController::RunConnectionTest() {
-  const std::vector<std::string> results = connection_test::Run();
-  summary_lines_.clear();
-  summary_lines_.push_back("Connection test:");
-  bool readwise_ok = false;
-  for (size_t i = 0; i < results.size(); i++) {
-    summary_lines_.push_back(results[i]);
-    app_.PrintStatus("NETTEST " + results[i]);
-    if (results[i].compare(0, 12, "Readwise: OK") == 0)
-      readwise_ok = true;
-  }
-  summary_lines_.push_back("");
-  summary_lines_.push_back(readwise_ok
-                               ? "Readwise upload can work over HTTPS."
-                               : "HTTPS to Readwise didn't work.");
-  summary_lines_.push_back("Please send me these lines.");
-  screen_ = kSummary;
-  dirty_ = true;
-}
-
 void SyncController::EnterPicker() {
   // A different file with the same name (e.g. another edition) can't be
   // saved next to ours, so it isn't offered.
@@ -656,10 +622,6 @@ void SyncController::RunFrame(const FrameInput &input) {
     } else if (chosen == 2) {
       local_wireless_ = !local_wireless_;
       dirty_ = true;
-    } else if (chosen == 3) {
-      // Drawn this frame; the (blocking) test runs on the next one.
-      screen_ = kTesting;
-      dirty_ = true;
     }
     break;
   }
@@ -719,9 +681,6 @@ void SyncController::RunFrame(const FrameInput &input) {
     }
     break;
   }
-  case kTesting:
-    RunConnectionTest();
-    break;
   case kSummary:
   case kError:
     if ((keys & (KEY_A | KEY_B)) || back_touched) {
@@ -921,14 +880,6 @@ void SyncController::Draw() {
     lines.push_back("");
     lines.push_back("A: done");
     break;
-  case kTesting:
-    lines.push_back("Testing secure connections to");
-    lines.push_back("Readwise and Hardcover...");
-    lines.push_back("(the first one can take a while");
-    lines.push_back("on an Old 3DS)");
-    lines.push_back("");
-    lines.push_back("This can take up to a minute.");
-    break;
   case kError:
     lines.push_back("Sync failed:");
     lines.push_back(message_);
@@ -962,11 +913,10 @@ void SyncController::Draw() {
   if (screen_ == kMenu) {
     const char *labels[kMenuOptionCount] = {
         "host a sync", "join a sync",
-        local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi",
-        "test Readwise connection"};
-    const char *hints[kMenuOptionCount] = {
-        "show a pairing code here >", "enter the host's code >",
-        "both consoles must match >", "needs Wi-Fi >"};
+        local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi"};
+    const char *hints[kMenuOptionCount] = {"show a pairing code here >",
+                                           "enter the host's code >",
+                                           "both consoles must match >"};
     for (int i = 0; i < kMenuOptionCount; i++) {
       Button button(ts);
       LayoutMenuButton(&button, i);

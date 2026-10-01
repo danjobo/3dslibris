@@ -112,15 +112,20 @@ Syncing with another 3DS (Wi-Fi or local wireless):
 - B stops a copy; the next sync carries on where it stopped
 - A summary shows what changed. B cancels while waiting
 
-Exporting highlights to Readwise:
-- In BOOK settings > bookmarks & notes, press X to export this book's
-  highlights and notes
-- In GENERAL settings (second page) > export highlights exports every
-  book at once
-- Files are written to `sdmc:/3ds/3dslibris/exports/` as
-  readwise-<date>-<time>.csv
-- Copy the file to a computer and upload it at readwise.io (Import >
-  CSV). Dates use the console clock, which Readwise reads as UTC.
+Readwise (GENERAL settings, second page > Readwise):
+- Upload highlights: sends highlights and notes from every book (all
+  folders) straight to Readwise over Wi-Fi. Only new or edited ones are
+  sent each time. Deleting a highlight here doesn't delete it in
+  Readwise
+- Your access token (from readwise.io/access_token) is needed once:
+  put it in `sdmc:/3ds/3dslibris/readwise-token.txt` from a computer,
+  or choose "Readwise token" and type it. It is stored as plain text
+  on the SD card
+- Export CSV file: writes every highlight to
+  `sdmc:/3ds/3dslibris/exports/readwise-<date>-<time>.csv`, for the
+  CSV import at readwise.io. In BOOK settings > bookmarks & notes, X
+  exports just this book
+- Dates use the console clock, which Readwise reads as UTC
 
 Other:
 - X: cycle theme (normal / dark / sepia)

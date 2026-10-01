@@ -18,4 +18,5 @@ enum class AppMode : u8
   BookInfo = 11,
   Sync = 12,
   DeleteBook = 13,
+  Readwise = 14,
 };

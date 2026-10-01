@@ -325,6 +325,10 @@ static void DrawTopGradientFromApp(void *user_data) {
                                  ctx->ts->screenleft, 400);
 }
 
+static Book *NewLibraryBook(App *app, LibraryGradientContext *gradient_ctx,
+                            const std::string &source_dir,
+                            const std::string &io_name, format_t format);
+
 static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ctx,
                                    const std::string &source_dir,
                                    const char *filename,
@@ -344,6 +348,18 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   LogFilenameStage(app, "d_name", raw_name.c_str());
   if (io_name != raw_name)
     LogFilenameStage(app, "d_name_io_fix", io_name.c_str());
+  Book *book = NewLibraryBook(app, gradient_ctx, source_dir, io_name, format);
+  if (app->prefs)
+    app->prefs->ApplySavedBookState(book);
+  LogFilenameStage(app, "book.filename", book->GetFileName());
+  LogFilenameStage(app, "book.title", book->GetTitle());
+  app->books.push_back(book);
+}
+
+// A Book for a file as the library sets one up, not yet in any list.
+static Book *NewLibraryBook(App *app, LibraryGradientContext *gradient_ctx,
+                            const std::string &source_dir,
+                            const std::string &io_name, format_t format) {
   BookContext ctx;
   ctx.text = app->ts.get();
   ctx.prefs = app->prefs.get();
@@ -363,13 +379,10 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());
   book->SetTitle(io_name.c_str());
-  if (app->prefs)
-    app->prefs->ApplySavedBookState(book);
-  LogFilenameStage(app, "book.filename", book->GetFileName());
-  LogFilenameStage(app, "book.title", book->GetTitle());
   book->format = format;
-  app->books.push_back(book);
+  return book;
 }
+
 
 static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
   DIR *dp = opendir(dir.c_str());
@@ -874,6 +887,23 @@ void LibraryController::OpenSelectedBrowserEntry() {
 bool LibraryController::IsInsideFolder() const { return inside_folder_; }
 
 void App::browser_draw() { library_controller_->browser_draw(); }
+
+Book *LibraryController::CreateDetachedBook(const std::string &folder,
+                                            const std::string &file_name) {
+  const format_t format = app_flow_utils::DetectBookFormat(file_name.c_str());
+  if (format == FORMAT_UNDEF)
+    return NULL;
+  gradient_ctx_.ts = app_.ts.get();
+  gradient_ctx_.color_mode = &app_.colorMode;
+  Book *book = NewLibraryBook(&app_, &gradient_ctx_, folder, file_name, format);
+  book->TryLoadMetadataFromCache();
+  return book;
+}
+
+Book *App::CreateDetachedBook(const std::string &folder,
+                              const std::string &file_name) {
+  return library_controller_->CreateDetachedBook(folder, file_name);
+}
 
 void App::browser_handleevent(const FrameInput &input) {
   library_controller_->browser_handleevent(input);

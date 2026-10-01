@@ -236,6 +236,10 @@ int MainLoopController::RunMainLoop()
     case AppMode::DeleteBook:
       app_.RunDeleteBookFrame(input);
       break;
+
+    case AppMode::Readwise:
+      app_.RunReadwiseFrame(input);
+      break;
     }
 
     if (app_.GetMode() == AppMode::Quit)

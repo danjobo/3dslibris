@@ -11,6 +11,7 @@
 #include "app/app.h"
 #include "app/sync_controller.h"
 #include "app/delete_book_controller.h"
+#include "app/readwise_controller.h"
 #include "app/library_controller.h"
 
 #include <3ds.h>
@@ -239,6 +240,13 @@ void App::ShowSyncView()
   ApplyRenderOrientation(portrait_orientation);
   nav_.mode = AppMode::Sync;
   sync_controller_->Show();
+}
+
+void App::ShowReadwiseView()
+{
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::Readwise;
+  readwise_controller_->Show();
 }
 
 void App::ShowDeleteBookView(Book *book)

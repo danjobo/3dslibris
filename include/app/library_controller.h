@@ -45,6 +45,11 @@ public:
   Book *RestoreSavedBookSelection(const char *folder, const char *filename);
   // Rescans the library from the top folder (closes the open book).
   void RebuildRoot();
+  // A Book for a library file that isn't in the current view (metadata
+  // from the cache when there is one), for reading its title and
+  // highlights. The caller deletes it. NULL for unsupported files.
+  Book *CreateDetachedBook(const std::string &folder,
+                           const std::string &file_name);
   // Rescans the folder being shown and selects the entry at select_index
   // (clamped), e.g. the book after one that was deleted.
   void RefreshCurrentFolder(int select_index);

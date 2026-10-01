@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "book/readwise_api_utils.h"
+
 class Book;
 
 namespace readwise_export {
@@ -26,5 +28,9 @@ struct Result {
 // Exports every highlight of the given books (folders and fixed-layout
 // books are skipped). Nothing is written when there are no highlights.
 Result ExportBooks(const std::vector<Book *> &books);
+
+// Exports already collected highlights (e.g. the whole library's).
+Result ExportHighlights(
+    const std::vector<readwise_api_utils::Highlight> &highlights, int books);
 
 } // namespace readwise_export

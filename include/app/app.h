@@ -85,6 +85,7 @@ class StartupController;
 class MainLoopController;
 class SyncController;
 class DeleteBookController;
+class ReadwiseController;
 
 #define APP_BROWSER_BUTTON_COUNT 4
 
@@ -294,6 +295,12 @@ public:
   void ShowBookInfoView();
   void ShowSyncView();
   void RunSyncFrame(const FrameInput &input);
+  // See LibraryController::CreateDetachedBook. The caller deletes it.
+  Book *CreateDetachedBook(const std::string &folder,
+                           const std::string &file_name);
+  // GENERAL settings > Readwise: upload or export highlights.
+  void ShowReadwiseView();
+  void RunReadwiseFrame(const FrameInput &input);
   // Library: hold X on a book to delete it.
   void ShowDeleteBookView(Book *book);
   void RunDeleteBookFrame(const FrameInput &input);
@@ -415,6 +422,7 @@ private:
   std::unique_ptr<MainLoopController> main_loop_controller_;
   std::unique_ptr<SyncController> sync_controller_;
   std::unique_ptr<DeleteBookController> delete_book_controller_;
+  std::unique_ptr<ReadwiseController> readwise_controller_;
   ReaderRuntimeState reader_state_;
   FILE *status_log_file_;
   unsigned int status_log_write_count_;

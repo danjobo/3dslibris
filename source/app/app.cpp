@@ -14,6 +14,7 @@
 #include "app/app.h"
 #include "app/sync_controller.h"
 #include "app/delete_book_controller.h"
+#include "app/readwise_controller.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -167,6 +168,8 @@ App::App()
   sync_controller_ = std::unique_ptr<SyncController>(new SyncController(*this));
   delete_book_controller_ = std::unique_ptr<DeleteBookController>(
       new DeleteBookController(*this));
+  readwise_controller_ =
+      std::unique_ptr<ReadwiseController>(new ReadwiseController(*this));
 
   // Initialize prefs view state.
   nav_.prefs.selected_index = -1;

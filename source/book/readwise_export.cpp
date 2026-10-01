@@ -10,6 +10,49 @@
 
 namespace readwise_export {
 
+namespace {
+
+Result WriteRows(const std::vector<readwise_csv_utils::Row> &rows,
+                 int books) {
+  Result result;
+  result.books = books;
+  result.highlights = (int)rows.size();
+  if (rows.empty())
+    return result;
+
+  mkdir(paths::GetExportsDir().c_str(), 0777);
+  result.path = paths::GetExportsDir() + "/" +
+                readwise_csv_utils::BuildFileName((uint32_t)time(NULL));
+  FILE *fp = fopen(result.path.c_str(), "wb");
+  if (!fp)
+    return result;
+  const std::string csv = readwise_csv_utils::BuildCsv(rows);
+  const bool wrote = fwrite(csv.data(), 1, csv.size(), fp) == csv.size();
+  result.ok = (fclose(fp) == 0) && wrote;
+  if (!result.ok)
+    remove(result.path.c_str());
+  return result;
+}
+
+} // namespace
+
+Result ExportHighlights(
+    const std::vector<readwise_api_utils::Highlight> &highlights, int books) {
+  std::vector<readwise_csv_utils::Row> rows;
+  for (size_t i = 0; i < highlights.size(); i++) {
+    const readwise_api_utils::Highlight &h = highlights[i];
+    readwise_csv_utils::Row row;
+    row.highlight = h.text;
+    row.title = h.title;
+    row.author = h.author;
+    row.note = h.note;
+    row.location = h.location;
+    row.date = h.highlighted_at;
+    rows.push_back(row);
+  }
+  return WriteRows(rows, books);
+}
+
 Result ExportBooks(const std::vector<Book *> &books) {
   Result result;
   std::vector<readwise_csv_utils::Row> rows;
@@ -49,23 +92,7 @@ Result ExportBooks(const std::vector<Book *> &books) {
     }
     result.books++;
   }
-
-  result.highlights = (int)rows.size();
-  if (rows.empty())
-    return result;
-
-  mkdir(paths::GetExportsDir().c_str(), 0777);
-  result.path = paths::GetExportsDir() + "/" +
-                readwise_csv_utils::BuildFileName((uint32_t)time(NULL));
-  FILE *fp = fopen(result.path.c_str(), "wb");
-  if (!fp)
-    return result;
-  const std::string csv = readwise_csv_utils::BuildCsv(rows);
-  const bool wrote = fwrite(csv.data(), 1, csv.size(), fp) == csv.size();
-  result.ok = (fclose(fp) == 0) && wrote;
-  if (!result.ok)
-    remove(result.path.c_str());
-  return result;
+  return WriteRows(rows, result.books);
 }
 
 } // namespace readwise_export

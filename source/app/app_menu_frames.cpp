@@ -9,6 +9,7 @@
 #include "app/app.h"
 #include "app/sync_controller.h"
 #include "app/delete_book_controller.h"
+#include "app/readwise_controller.h"
 
 #include <3ds.h>
 #include <ctype.h>
@@ -669,6 +670,11 @@ void App::RunSyncFrame(const FrameInput &input)
 void App::RunDeleteBookFrame(const FrameInput &input)
 {
   delete_book_controller_->RunFrame(input);
+}
+
+void App::RunReadwiseFrame(const FrameInput &input)
+{
+  readwise_controller_->RunFrame(input);
 }
 
 void App::RunBookmarksMenuFrame(const FrameInput &input)
