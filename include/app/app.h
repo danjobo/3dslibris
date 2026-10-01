@@ -83,6 +83,7 @@ class SettingsController;
 class StatusController;
 class StartupController;
 class MainLoopController;
+class SyncController;
 
 #define APP_BROWSER_BUTTON_COUNT 4
 
@@ -290,6 +291,8 @@ public:
   void ShowBookmarksView();
   void ShowChaptersView();
   void ShowBookInfoView();
+  void ShowSyncView();
+  void RunSyncFrame(const FrameInput &input);
   bool BookNeedsRelayout(Book *book) const;
   size_t PauseBrowserJobs();
   void LoadVisibleBrowserCoverCaches();
@@ -401,6 +404,7 @@ private:
   std::unique_ptr<StatusController> status_controller_;
   std::unique_ptr<StartupController> startup_controller_;
   std::unique_ptr<MainLoopController> main_loop_controller_;
+  std::unique_ptr<SyncController> sync_controller_;
   ReaderRuntimeState reader_state_;
   FILE *status_log_file_;
   unsigned int status_log_write_count_;

@@ -463,3 +463,30 @@ bool Book::ApplyAnchoredStateAfterLayout() {
   progress_saved_position_ = position;
   return moved;
 }
+
+const BookState &Book::GetBookState() {
+  EnsureAnnotationsLoaded();
+  return state_;
+}
+
+void Book::ApplySyncedState(const BookState &state) {
+  EnsureAnnotationsLoaded();
+  state_ = state;
+  InvalidateAnnotationSpans();
+  SaveAnnotations();
+  if (GetPageCount() > 0 && !IsAsyncReflowOpenPending()) {
+    ApplyAnchoredStateAfterLayout();
+    return;
+  }
+  // Not laid out: keep the library and prefs roughly right; the anchors give
+  // exact pages the next time the book opens.
+  std::vector<u16> marked;
+  for (size_t i = 0; i < state_.records.size(); i++)
+    if (state_.records[i].IsLiveBookmark())
+      marked.push_back(state_.records[i].page_hint);
+  std::sort(marked.begin(), marked.end());
+  marked.erase(std::unique(marked.begin(), marked.end()), marked.end());
+  GetBookmarks().assign(marked.begin(), marked.end());
+  if (state_.has_progress)
+    SetPosition((int)state_.progress.page_hint);
+}

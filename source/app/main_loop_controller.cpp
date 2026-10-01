@@ -228,6 +228,10 @@ int MainLoopController::RunMainLoop()
     case AppMode::BookInfo:
       app_.RunBookInfoFrame(input);
       break;
+
+    case AppMode::Sync:
+      app_.RunSyncFrame(input);
+      break;
     }
 
     if (app_.GetMode() == AppMode::Quit)

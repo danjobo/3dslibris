@@ -9,6 +9,7 @@
 */
 
 #include "app/app.h"
+#include "app/sync_controller.h"
 
 #include <3ds.h>
 
@@ -224,6 +225,13 @@ void App::ShowChaptersView()
            "INDEX open chapters=%u page_count=%u reader_page=%u menu_page=%u",
            (unsigned)book->GetChapters().size(), (unsigned)book->GetPageCount(),
            (unsigned)book->GetPosition(), (unsigned)chaptermenu->GetCurrentPage());
+}
+
+void App::ShowSyncView()
+{
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::Sync;
+  sync_controller_->Show();
 }
 
 void App::ShowBookInfoView()

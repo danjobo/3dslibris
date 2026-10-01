@@ -9,7 +9,10 @@ int main() {
   page.fixed_layout = false;
   page.include_line_wrap_fix = false;
   test::ExpectEq("unified general page 1 count",
-                 settings::PrefsPageButtonCount(page), 6);
+                 settings::PrefsPageButtonCount(page), 7);
+  test::ExpectEq("unified general page 1 sync button",
+                 settings::PrefsPageButtonForSlot(page, 6),
+                 PREFS_BUTTON_SYNC_DEVICES);
   test::ExpectEq("unified general page 1 first button",
                  settings::PrefsPageButtonForSlot(page, 0),
                  PREFS_BUTTON_STYLE_CUSTOMIZATION);
@@ -53,7 +56,7 @@ int main() {
                  PREFS_BUTTON_LIBRARY_VIEW);
 
   test::ExpectEq("general visible count",
-                 settings::VisiblePrefsButtonCount(false, false), 6);
+                 settings::VisiblePrefsButtonCount(false, false), 7);
   test::ExpectEq("reflow book page 1 count",
                  settings::VisiblePrefsButtonCount(true, false), 6);
   test::ExpectEq("MOBI book page 1 count",

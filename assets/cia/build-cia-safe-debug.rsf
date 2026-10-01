@@ -152,6 +152,7 @@ AccessControlInfo:
    - mcu::HWC
    - ndm:u
    - ptm:u
+   - soc:U # sockets (Wi-Fi sync)
 
 SystemControlInfo:
   SaveDataSize            : 0KB

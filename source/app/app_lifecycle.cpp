@@ -12,6 +12,7 @@
 */
 
 #include "app/app.h"
+#include "app/sync_controller.h"
 
 #include <3ds.h>
 
@@ -163,6 +164,8 @@ void App::HandleAppletSuspend()
            (unsigned)removed_jobs);
 #endif
   OnReaderAppletSuspended();
+  if (sync_controller_)
+    sync_controller_->OnAppletSuspended();
   // Free FreeType glyph bitmap cache to release RAM for the HOME menu.
   // Bounded at 512 glyphs per face × multiple faces × per-glyph buffer alloc
   // — can be hundreds of KB. Cache re-warms transparently on resume.

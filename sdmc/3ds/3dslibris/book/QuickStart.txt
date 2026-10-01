@@ -87,6 +87,16 @@ Highlights & notes:
 - They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
   font size and layout changes and clearing the cache
 
+Syncing with another 3DS (Wi-Fi):
+- Both consoles need 3dslibris and the same Wi-Fi network
+- On one console: GENERAL settings > sync with another 3DS > host a sync.
+  It shows a 4-digit pairing code
+- On the other: the same screen > join a sync, then enter that code
+- Reading positions, bookmarks, highlights and notes are shared for
+  books both consoles have (same file name and size). The most recently
+  read position wins; deletions are synced too
+- A summary shows what changed. B cancels while waiting
+
 Exporting highlights to Readwise:
 - In BOOK settings > bookmarks & notes, press X to export this book's
   highlights and notes

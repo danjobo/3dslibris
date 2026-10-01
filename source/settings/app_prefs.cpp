@@ -285,6 +285,7 @@ void SettingsController::ShowSettingsView(bool from_book) {
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
   PrefsRefreshButton(PREFS_BUTTON_CLEAR_CACHE);
   PrefsRefreshButton(PREFS_BUTTON_EXPORT_HIGHLIGHTS);
+  PrefsRefreshButton(PREFS_BUTTON_SYNC_DEVICES);
 
   u8 visible_count = PrefsVisibleButtonCount();
   if (visible_count == 0)
@@ -324,7 +325,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins",
-      "export highlights"};
+      "export highlights", "sync with another 3DS"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -1025,6 +1026,10 @@ void SettingsController::PrefsRefreshButton(int index) {
   case PREFS_BUTTON_RESET_DEFAULTS:
     app_.prefsButtons[PREFS_BUTTON_RESET_DEFAULTS].SetLabel2(std::string("restore defaults >"));
     break;
+  case PREFS_BUTTON_SYNC_DEVICES:
+    app_.prefsButtons[PREFS_BUTTON_SYNC_DEVICES].SetLabel2(
+        std::string("progress, bookmarks, notes >"));
+    break;
   case PREFS_BUTTON_EXPORT_HIGHLIGHTS:
     app_.prefsButtons[PREFS_BUTTON_EXPORT_HIGHLIGHTS].SetLabel2(
         std::string("all books to Readwise CSV >"));
@@ -1309,6 +1314,11 @@ void SettingsController::PrefsHandlePress() {
 
   if (selected_button == PREFS_BUTTON_EXPORT_HIGHLIGHTS) {
     ExportAllHighlights();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_SYNC_DEVICES) {
+    app_.ShowSyncView();
     return;
   }
 }

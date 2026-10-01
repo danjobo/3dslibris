@@ -152,7 +152,7 @@ AccessControlInfo:
    - mcu::HWC
    - ndm:u
    - ptm:u
-   # - soc:U # sockets
+   - soc:U # sockets (Wi-Fi sync)
    # - http:C # download content
    # - ssl:C
    # - pxi:dev # low level processor

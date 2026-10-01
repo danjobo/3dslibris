@@ -12,6 +12,7 @@
 */
 
 #include "app/app.h"
+#include "app/sync_controller.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -162,6 +163,7 @@ App::App()
   status_controller_ = std::unique_ptr<StatusController>(new StatusController(*this));
   startup_controller_ = std::unique_ptr<StartupController>(new StartupController(*this));
   main_loop_controller_ = std::unique_ptr<MainLoopController>(new MainLoopController(*this));
+  sync_controller_ = std::unique_ptr<SyncController>(new SyncController(*this));
 
   // Initialize prefs view state.
   nav_.prefs.selected_index = -1;

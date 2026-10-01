@@ -515,6 +515,12 @@ public:
   //! position by their text, migrating page-number bookmarks on first use.
   //! Returns true when the position was moved.
   bool ApplyAnchoredStateAfterLayout();
+  //! The whole per-book state (for sync).
+  const BookState &GetBookState();
+  //! Replaces the per-book state with a synced one, saves it, and updates
+  //! bookmarks and position (exactly if laid out, else from page hints until
+  //! the book is next opened).
+  void ApplySyncedState(const BookState &state);
 
   // Reader selection mode: record word boxes during Page::Draw.
   void SetWordCaptureEnabled(bool enabled) { word_capture_enabled_ = enabled; }
