@@ -489,24 +489,17 @@ void SyncController::RunConnectionTest() {
   const std::vector<std::string> results = connection_test::Run();
   summary_lines_.clear();
   summary_lines_.push_back("Connection test:");
-  bool checked = false, unchecked = false;
+  bool readwise_ok = false;
   for (size_t i = 0; i < results.size(); i++) {
     summary_lines_.push_back(results[i]);
     app_.PrintStatus("NETTEST " + results[i]);
-    const bool ok = results[i].find(": OK") != std::string::npos;
-    if (results[i].compare(0, 22, "Readwise, cert checked") == 0)
-      checked = ok;
-    if (results[i].compare(0, 23, "Readwise, no cert check") == 0)
-      unchecked = ok;
+    if (results[i].compare(0, 12, "Readwise: OK") == 0)
+      readwise_ok = true;
   }
   summary_lines_.push_back("");
-  if (checked)
-    summary_lines_.push_back("Readwise upload can use the 3DS's own HTTPS.");
-  else if (unchecked)
-    summary_lines_.push_back("Readwise works only without the "
-                             "certificate check.");
-  else
-    summary_lines_.push_back("The 3DS's own HTTPS can't reach Readwise.");
+  summary_lines_.push_back(readwise_ok
+                               ? "Readwise upload can work over HTTPS."
+                               : "HTTPS to Readwise didn't work.");
   summary_lines_.push_back("Please send me these lines.");
   screen_ = kSummary;
   dirty_ = true;
@@ -931,6 +924,8 @@ void SyncController::Draw() {
   case kTesting:
     lines.push_back("Testing secure connections to");
     lines.push_back("Readwise and Hardcover...");
+    lines.push_back("(the first one can take a while");
+    lines.push_back("on an Old 3DS)");
     lines.push_back("");
     lines.push_back("This can take up to a minute.");
     break;

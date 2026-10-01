@@ -55,6 +55,22 @@ the corresponding source for that binary available.
 - Upstream code lives under `third_party/expat/`.
 - Preserve the upstream Expat license notice embedded in that code.
 
+### libcurl and mbedTLS (devkitPro portlibs)
+
+- Linked from the devkitPro `3ds-curl` and `3ds-mbedtls` packages for HTTPS
+  (e.g. the Readwise connection), because the 3DS's own SSL service can't
+  negotiate with current servers.
+- libcurl: curl license (MIT/X derivative), https://curl.se/docs/copyright.html
+- mbedTLS: Apache License 2.0, https://github.com/Mbed-TLS/mbedtls
+
+### Mozilla CA certificate bundle
+
+- `sdmc/3ds/3dslibris/resources/cacert.pem`, as published by the curl
+  project (https://curl.se/docs/caextract.html) from Mozilla's root store.
+- License: Mozilla Public License 2.0.
+- Used to verify HTTPS servers. Replace it with a newer copy from that page
+  when root certificates change.
+
 ### Fonts and MuPDF bundled resources
 
 MuPDF vendors additional third-party assets and notices, including:
