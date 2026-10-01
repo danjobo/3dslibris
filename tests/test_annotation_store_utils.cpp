@@ -148,6 +148,45 @@ void TestParseRejects() {
   test::ExpectFalse("bad progress ignored", out.has_progress);
 }
 
+void TestColors() {
+  BookState state;
+  Annotation green = MakeHighlight(IdOf(kConsoleA, 1), "green one", "", "");
+  green.color = 1;
+  Annotation purple = MakeHighlight(IdOf(kConsoleA, 2), "purple one", "", "n");
+  purple.color = 4;
+  state.records.push_back(green);
+  state.records.push_back(purple);
+  const std::string text = annotation_store_utils::Serialize(state);
+  test::ExpectTrue("written as v3",
+                   text.compare(0, 21, "3DSLIBRIS-BOOKSTATE 3") == 0);
+  BookState out;
+  test::ExpectTrue("parsed",
+                   annotation_store_utils::Parse(text, kConsoleA, &out));
+  test::ExpectEq("count", (int)out.records.size(), 2);
+  test::ExpectEq("green kept", (int)out.records[0].color, 1);
+  test::ExpectEq("purple kept", (int)out.records[1].color, 4);
+  test::ExpectStrEq("note still read", out.records[1].note.c_str(), "n");
+
+  // v2 files (before colors) load as yellow.
+  const std::string v2 = "3DSLIBRIS-BOOKSTATE 2\n"
+                         "H\t0000000100000001\t1\t1\t0\t1\t1\told\t\tnote\n";
+  test::ExpectTrue("v2 parsed",
+                   annotation_store_utils::Parse(v2, kConsoleA, &out));
+  test::ExpectEq("v2 record", (int)out.records.size(), 1);
+  test::ExpectEq("v2 is yellow", (int)out.records[0].color, 0);
+  test::ExpectStrEq("v2 note", out.records[0].note.c_str(), "note");
+
+  // A color this version doesn't know shows as yellow; junk is rejected.
+  const std::string future =
+      "3DSLIBRIS-BOOKSTATE 3\n"
+      "H\t0000000100000001\t1\t1\t0\t1\t1\tnew\t\t\t9\n"
+      "H\t0000000100000002\t1\t1\t0\t1\t1\tbad\t\t\tblue\n";
+  test::ExpectTrue("future parsed",
+                   annotation_store_utils::Parse(future, kConsoleA, &out));
+  test::ExpectEq("bad color line skipped", (int)out.records.size(), 1);
+  test::ExpectEq("unknown color is yellow", (int)out.records[0].color, 0);
+}
+
 void TestBuildFileName() {
   const std::string a =
       annotation_store_utils::BuildFileName("sdmc:/books", "My Book: 1.epub");
@@ -228,6 +267,7 @@ int main() {
   TestSerializeParseRoundTrip();
   TestParseV1MigratesIds();
   TestParseRejects();
+  TestColors();
   TestBuildFileName();
   TestFileRoundTrip();
   TestNextId();

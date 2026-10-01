@@ -34,10 +34,11 @@ struct Annotation {
   std::string quote;         // Normalized anchor text (UTF-8).
   std::string prefix;        // Normalized text just before the quote.
   std::string note;          // Highlights only; optional.
+  uint8_t color;             // Highlights only; highlight_color_utils::Color.
 
   Annotation()
       : id(0), kind(kHighlight), created(0), modified(0), deleted(false),
-        page_hint(0), page_count_hint(0) {}
+        page_hint(0), page_count_hint(0), color(0) {}
 
   bool IsLiveHighlight() const { return kind == kHighlight && !deleted; }
   bool IsLiveBookmark() const { return kind == kBookmark && !deleted; }

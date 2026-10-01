@@ -14,6 +14,7 @@
 #include <time.h>
 
 #include "book/annotation_store_utils.h"
+#include "book/highlight_color_utils.h"
 #include "book/page.h"
 #include "shared/console_id.h"
 #include "shared/debug_log.h"
@@ -90,8 +91,8 @@ const Annotation *Book::FindAnnotation(uint64_t id) {
 }
 
 uint64_t Book::AddAnnotationFromPageRange(int page_index, int buf_begin,
-                                          int buf_end,
-                                          const std::string &note) {
+                                          int buf_end, const std::string &note,
+                                          uint8_t color) {
   EnsureAnnotationsLoaded();
   if (!SupportsAnnotations())
     return 0;
@@ -103,6 +104,33 @@ uint64_t Book::AddAnnotationFromPageRange(int page_index, int buf_begin,
           page->GetBuffer(), page->GetLength(), buf_begin, buf_end,
           kMaxQuoteChars, kPrefixChars, &a.quote, &a.prefix))
     return 0;
+  return AddHighlightRecord(&a, page_index, note, color);
+}
+
+uint64_t Book::AddAnnotationAcrossPages(int page_index, int buf_begin,
+                                        int next_page_buf_end,
+                                        const std::string &note,
+                                        uint8_t color) {
+  EnsureAnnotationsLoaded();
+  if (!SupportsAnnotations())
+    return 0;
+  Page *page = GetPage(page_index);
+  Page *next = GetPage(page_index + 1);
+  if (!page || !page->GetBuffer() || !next || !next->GetBuffer())
+    return 0;
+  Annotation a;
+  if (!annotation_text_utils::BuildAnchorAcrossPages(
+          page->GetBuffer(), page->GetLength(), buf_begin, next->GetBuffer(),
+          next->GetLength(), next_page_buf_end, kMaxQuoteChars, kPrefixChars,
+          &a.quote, &a.prefix))
+    return 0;
+  return AddHighlightRecord(&a, page_index, note, color);
+}
+
+uint64_t Book::AddHighlightRecord(Annotation *anchored, int page_index,
+                                  const std::string &note, uint8_t color) {
+  Annotation &a = *anchored;
+  a.color = highlight_color_utils::Clamp(color);
   a.id = annotation_store_utils::NextId(state_, console_id::Prefix());
   a.kind = Annotation::kHighlight;
   a.created = Now();
@@ -123,6 +151,24 @@ bool Book::SetAnnotationNote(uint64_t id, const std::string &note) {
     if (a.id != id || !a.IsLiveHighlight())
       continue;
     a.note = note;
+    a.modified = Now();
+    SaveAnnotations();
+    return true;
+  }
+  return false;
+}
+
+bool Book::SetAnnotationColor(uint64_t id, uint8_t color) {
+  EnsureAnnotationsLoaded();
+  if (color >= highlight_color_utils::kCount)
+    color = 0;
+  for (size_t i = 0; i < state_.records.size(); i++) {
+    Annotation &a = state_.records[i];
+    if (a.id != id || !a.IsLiveHighlight())
+      continue;
+    if (a.color == color)
+      return true;
+    a.color = color;
     a.modified = Now();
     SaveAnnotations();
     return true;
@@ -266,6 +312,8 @@ void Book::CollectHighlightRanges(const Page *page,
       range.buf_begin = entry.spans[s].buf_begin;
       range.buf_end = entry.spans[s].buf_end;
       range.annotation_id = entry.id;
+      const Annotation *a = FindAnnotation(entry.id);
+      range.color = a ? a->color : 0;
       out->push_back(range);
     }
   }

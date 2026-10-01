@@ -64,6 +64,8 @@ public:
   bool swapshoulder;
   bool time24h;
   bool show_time_remaining;
+  // Color for new highlights: the last one chosen (highlight_color_utils).
+  uint8_t highlight_color;
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
   bool circle_pad_page_turn;

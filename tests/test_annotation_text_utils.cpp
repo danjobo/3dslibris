@@ -203,6 +203,50 @@ void TestQuoteAcrossPageBreak() {
                     "sentence that");
 }
 
+void TestAnchorAcrossPagesRoundTrip() {
+  Pages pages;
+  pages.pages.push_back(Buf("Earlier text. The highlight starts here and"));
+  pages.pages.push_back(Buf("ends on this page. Then more."));
+  const std::vector<uint32_t> &p0 = pages.pages[0];
+  const std::vector<uint32_t> &p1 = pages.pages[1];
+  const int begin = 14; // "The"
+  const int end = 18;   // through "page."
+  std::string quote, prefix;
+  test::ExpectTrue("built", annotation_text_utils::BuildAnchorAcrossPages(
+                                p0.data(), (int)p0.size(), begin, p1.data(),
+                                (int)p1.size(), end, 1000, 16, &quote,
+                                &prefix));
+  test::ExpectStrEq("quote joins the pages", quote.c_str(),
+                    "The highlight starts here and ends on this page.");
+  test::ExpectStrEq("prefix", prefix.c_str(), "Earlier text.");
+  std::vector<ResolvedSpan> spans;
+  test::ExpectTrue("resolves", annotation_text_utils::ResolveAnchor(
+                                   quote, prefix, 0, 2, 2, PageBuffer, &pages,
+                                   3, &spans));
+  test::ExpectEq("two spans", (int)spans.size(), 2);
+  test::ExpectStrEq("first page part", SpanText(pages, spans[0]).c_str(),
+                    "The highlight starts here and");
+  test::ExpectStrEq("second page part", SpanText(pages, spans[1]).c_str(),
+                    "ends on this page.");
+}
+
+void TestAnchorAcrossPagesSpaces() {
+  // A page that already ends with a space gets no extra one.
+  std::vector<uint32_t> p0 = Buf("first part ");
+  std::vector<uint32_t> p1 = Buf("second part");
+  std::string quote, prefix;
+  test::ExpectTrue("built", annotation_text_utils::BuildAnchorAcrossPages(
+                                p0.data(), (int)p0.size(), 6, p1.data(),
+                                (int)p1.size(), 6, 1000, 16, &quote,
+                                &prefix));
+  test::ExpectStrEq("single space", quote.c_str(), "part second");
+  // Only the page-break space selected: nothing to quote.
+  test::ExpectFalse("empty", annotation_text_utils::BuildAnchorAcrossPages(
+                                 p0.data(), (int)p0.size(), 11, p1.data(),
+                                 (int)p1.size(), 0, 1000, 16, &quote,
+                                 &prefix));
+}
+
 void TestFallsBackToWholeBook() {
   Pages pages;
   for (int i = 0; i < 20; i++)
@@ -240,6 +284,8 @@ int main() {
   TestPrefixDisambiguates();
   TestNearestPageWinsTie();
   TestQuoteAcrossPageBreak();
+  TestAnchorAcrossPagesRoundTrip();
+  TestAnchorAcrossPagesSpaces();
   TestFallsBackToWholeBook();
   return 0;
 }

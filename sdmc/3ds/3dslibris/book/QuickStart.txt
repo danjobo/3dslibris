@@ -78,9 +78,15 @@ Highlights & notes:
 - Touch: drag across words on the touch screen to select them
 - Y: show a copy of the top screen on the touch screen, so you can
   select its text by touch too (press Y again to go back)
+- To continue a selection on the next page, move past the last word:
+  the page turns and the selection carries on (moving back before the
+  first word returns to the previous page)
 - After selecting, choose Highlight, Highlight + note, or Cancel
-- Put the cursor on an existing highlight and press A to edit its note
-  or delete it
+- Colors: in that menu, D-Pad Left/Right (or the Color row) picks
+  yellow, green, blue, pink or purple. New highlights use the last
+  color you chose
+- Put the cursor on an existing highlight and press A to edit its note,
+  change its color or delete it
 - B: undo the start mark, or leave selection mode
 - Highlights and notes are listed with your bookmarks in
   BOOK settings > bookmarks & notes

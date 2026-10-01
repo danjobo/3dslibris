@@ -26,8 +26,8 @@ struct WordBox {
 
 enum class SelectionPopup : uint8_t {
   None = 0,
-  NewSelection,      // Highlight / Highlight + note / Cancel
-  ExistingHighlight, // Edit note / Delete / Cancel
+  NewSelection,      // Highlight / Highlight + note / Color / Cancel
+  ExistingHighlight, // Edit note / Color / Delete / Cancel
 };
 
 // Direction on the page, as the reader sees it.
@@ -49,6 +49,15 @@ struct TextSelectionState {
   uint64_t popup_annotation_id = 0;
   int popup_buf_begin = -1;
   int popup_buf_end = -1;
+  // Page popup_buf_begin is on; popup_buf_end is on the page after it when
+  // the selection crosses a page break.
+  int popup_page = -1;
+  uint8_t popup_color = 0;
+
+  // A selection carried over a page break: it started at carried_buf_begin
+  // on carried_page; on the current page it covers word 0 to the cursor.
+  int carried_page = -1;
+  int carried_buf_begin = -1;
 
   bool x_hold_armed = false;
   bool x_hold_consumed = false;
@@ -67,6 +76,10 @@ struct TextSelectionState {
     popup_annotation_id = 0;
     popup_buf_begin = -1;
     popup_buf_end = -1;
+    popup_page = -1;
+    popup_color = 0;
+    carried_page = -1;
+    carried_buf_begin = -1;
   }
 };
 

@@ -310,49 +310,98 @@ std::vector<uint32_t> Utf8ToCodepoints(const std::string &s) {
   return out;
 }
 
+namespace {
+
+void NormalizePage(const uint32_t *buf, int len, VisibleText *out) {
+  VisibleText raw;
+  ExtractVisibleText(buf, len, &raw);
+  NormalizeVisibleText(raw, out);
+}
+
+// Quote = the selected characters (first to last), trimmed and capped;
+// prefix = the text just before them.
+bool AnchorFromSelection(const std::vector<uint32_t> &chars,
+                         const std::vector<bool> &selected,
+                         size_t max_quote_chars, size_t prefix_chars,
+                         std::string *quote, std::string *prefix) {
+  size_t first = chars.size();
+  size_t last = 0;
+  for (size_t i = 0; i < chars.size(); i++) {
+    if (!selected[i])
+      continue;
+    if (first == chars.size())
+      first = i;
+    last = i + 1;
+  }
+  while (first < last && chars[first] == ' ')
+    first++;
+  while (last > first && chars[last - 1] == ' ')
+    last--;
+  if (first >= last)
+    return false;
+  if (max_quote_chars > 0 && last - first > max_quote_chars)
+    last = first + max_quote_chars;
+  while (last > first && chars[last - 1] == ' ')
+    last--;
+
+  size_t prefix_end = first;
+  while (prefix_end > 0 && chars[prefix_end - 1] == ' ')
+    prefix_end--;
+  size_t prefix_begin =
+      prefix_end > prefix_chars ? prefix_end - prefix_chars : 0;
+  while (prefix_begin < prefix_end && chars[prefix_begin] == ' ')
+    prefix_begin++;
+
+  *quote = CodepointsToUtf8(chars, first, last);
+  *prefix = CodepointsToUtf8(chars, prefix_begin, prefix_end);
+  return true;
+}
+
+} // namespace
+
 bool BuildAnchorFromBufferRange(const uint32_t *buf, int len, int buf_begin,
                                 int buf_end, size_t max_quote_chars,
                                 size_t prefix_chars, std::string *quote,
                                 std::string *prefix) {
   if (!quote || !prefix || buf_end <= buf_begin)
     return false;
-  VisibleText raw;
-  ExtractVisibleText(buf, len, &raw);
   VisibleText norm;
-  NormalizeVisibleText(raw, &norm);
+  NormalizePage(buf, len, &norm);
+  std::vector<bool> selected(norm.chars.size());
+  for (size_t i = 0; i < norm.chars.size(); i++)
+    selected[i] =
+        norm.buf_index[i] >= buf_begin && norm.buf_index[i] < buf_end;
+  return AnchorFromSelection(norm.chars, selected, max_quote_chars,
+                             prefix_chars, quote, prefix);
+}
 
-  size_t first = norm.chars.size();
-  size_t last = 0;
-  for (size_t i = 0; i < norm.chars.size(); i++) {
-    const int bi = norm.buf_index[i];
-    if (bi < buf_begin || bi >= buf_end)
-      continue;
-    if (first == norm.chars.size())
-      first = i;
-    last = i + 1;
-  }
-  while (first < last && norm.chars[first] == ' ')
-    first++;
-  while (last > first && norm.chars[last - 1] == ' ')
-    last--;
-  if (first >= last)
+bool BuildAnchorAcrossPages(const uint32_t *buf, int len, int buf_begin,
+                            const uint32_t *next_buf, int next_len,
+                            int buf_end, size_t max_quote_chars,
+                            size_t prefix_chars, std::string *quote,
+                            std::string *prefix) {
+  if (!quote || !prefix)
     return false;
-  if (max_quote_chars > 0 && last - first > max_quote_chars)
-    last = first + max_quote_chars;
-  while (last > first && norm.chars[last - 1] == ' ')
-    last--;
-
-  size_t prefix_end = first;
-  while (prefix_end > 0 && norm.chars[prefix_end - 1] == ' ')
-    prefix_end--;
-  size_t prefix_begin =
-      prefix_end > prefix_chars ? prefix_end - prefix_chars : 0;
-  while (prefix_begin < prefix_end && norm.chars[prefix_begin] == ' ')
-    prefix_begin++;
-
-  *quote = CodepointsToUtf8(norm.chars, first, last);
-  *prefix = CodepointsToUtf8(norm.chars, prefix_begin, prefix_end);
-  return true;
+  VisibleText first, next;
+  NormalizePage(buf, len, &first);
+  NormalizePage(next_buf, next_len, &next);
+  std::vector<uint32_t> chars = first.chars;
+  std::vector<bool> selected(first.chars.size());
+  for (size_t i = 0; i < first.chars.size(); i++)
+    selected[i] = first.buf_index[i] >= buf_begin;
+  // ResolveAnchor's window puts a space between the pages unless one of
+  // them already has one there.
+  if (!first.chars.empty() && !next.chars.empty() &&
+      first.chars.back() != ' ' && next.chars[0] != ' ') {
+    chars.push_back(' ');
+    selected.push_back(true);
+  }
+  for (size_t i = 0; i < next.chars.size(); i++) {
+    chars.push_back(next.chars[i]);
+    selected.push_back(next.buf_index[i] < buf_end);
+  }
+  return AnchorFromSelection(chars, selected, max_quote_chars, prefix_chars,
+                             quote, prefix);
 }
 
 int RemapPageHint(int page_hint, int page_count_hint, int page_count) {

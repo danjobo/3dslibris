@@ -24,7 +24,8 @@
 
 namespace sync_protocol {
 
-static const uint32_t kProtocolVersion = 1;
+// 2: highlight colors (book state format v3), which version 1 can't read.
+static const uint32_t kProtocolVersion = 2;
 static const uint32_t kMaxPayloadBytes = 16u * 1024u * 1024u;
 static const size_t kHeaderBytes = 12;
 static const size_t kTrailerBytes = 4;

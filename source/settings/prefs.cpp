@@ -12,6 +12,7 @@
 */
 
 #include "settings/prefs.h"
+#include "book/highlight_color_utils.h"
 
 #include "3ds.h"
 #include "app/app.h"
@@ -307,6 +308,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         p->prefs->time24h = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "showTimeRemaining"))
         p->prefs->show_time_remaining = atoi(attr[i + 1]) != 0;
+      if (!strcmp(attr[i], "highlightColor"))
+        p->prefs->highlight_color =
+            highlight_color_utils::Clamp((uint8_t)atoi(attr[i + 1]));
       if (!strcmp(attr[i], "browserView")) {
         p->prefs->browser_view_mode =
             browser_view_utils::ParsePrefValue(attr[i + 1]);
@@ -600,9 +604,9 @@ int Prefs::Write() {
 
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
-      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" />\n",
+      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" highlightColor=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" />\n",
           swapshoulder, time24h,
-      show_time_remaining ? 1 : 0,
+      show_time_remaining ? 1 : 0, (int)highlight_color,
           browser_view_utils::ToPrefValue(browser_view_mode),
           fixed_layout_rtl ? 1 : 0,
           circle_pad_page_turn ? 1 : 0,
@@ -771,6 +775,7 @@ void Prefs::Init() {
   swapshoulder = false;
   time24h = true;
   show_time_remaining = false;
+  highlight_color = 0;
   browser_view_mode = BROWSER_VIEW_GALLERY;
   fixed_layout_rtl = false;
   circle_pad_page_turn = true;

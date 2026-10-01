@@ -44,6 +44,15 @@ bool BuildAnchorFromBufferRange(const uint32_t *buf, int len, int buf_begin,
                                 size_t prefix_chars, std::string *quote,
                                 std::string *prefix);
 
+// Same for a range that starts at buf_begin on one page and ends before
+// buf_end on the following page. The two pages' text is joined exactly as
+// ResolveAnchor joins them, so the anchor resolves to two spans.
+bool BuildAnchorAcrossPages(const uint32_t *buf, int len, int buf_begin,
+                            const uint32_t *next_buf, int next_len,
+                            int buf_end, size_t max_quote_chars,
+                            size_t prefix_chars, std::string *quote,
+                            std::string *prefix);
+
 // Proportional page remap used to center the anchor search after reflow.
 int RemapPageHint(int page_hint, int page_count_hint, int page_count);
 

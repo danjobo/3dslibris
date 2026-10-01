@@ -482,6 +482,7 @@ public:
     int buf_begin;
     int buf_end;
     uint64_t annotation_id;
+    uint8_t color; // highlight_color_utils::Color
   };
   bool SupportsAnnotations() const;
   //! All records, including bookmarks and deleted ones (tombstones); use
@@ -491,8 +492,14 @@ public:
   const Annotation *FindAnnotation(uint64_t id);
   //! Returns the new highlight id, or 0 if the range has no visible text.
   uint64_t AddAnnotationFromPageRange(int page_index, int buf_begin,
-                                      int buf_end, const std::string &note);
+                                      int buf_end, const std::string &note,
+                                      uint8_t color = 0);
+  //! A highlight from buf_begin on page_index to buf_end on the next page.
+  uint64_t AddAnnotationAcrossPages(int page_index, int buf_begin,
+                                    int next_page_buf_end,
+                                    const std::string &note, uint8_t color);
   bool SetAnnotationNote(uint64_t id, const std::string &note);
+  bool SetAnnotationColor(uint64_t id, uint8_t color);
   //! Leaves a tombstone so the deletion syncs.
   bool RemoveAnnotation(uint64_t id);
   //! Page where the highlight currently starts, or -1 if it can't be found.
@@ -533,6 +540,9 @@ private:
   };
   void EnsureAnnotationsLoaded();
   void SaveAnnotations();
+  // Fills in an anchored highlight's id, times and page hints, then saves.
+  uint64_t AddHighlightRecord(Annotation *anchored, int page_index,
+                              const std::string &note, uint8_t color);
   void InvalidateAnnotationSpans() { annotation_spans_valid_ = false; }
   // Page drawing only searches near each highlight's last known page; the
   // (slow) whole-book search runs when allow_full_scan is set, i.e. when the

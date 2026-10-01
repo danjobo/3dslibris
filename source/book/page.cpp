@@ -26,6 +26,7 @@
 */
 
 #include "book/page.h"
+#include "book/highlight_color_utils.h"
 
 #include "book/annotation_text_utils.h"
 #include "book/book.h"
@@ -125,18 +126,13 @@ bool IsDarkColorMode(Text *ts) {
   return mode == 1 || mode == 4 || mode == 5;
 }
 
-// RGB565 tints drawn behind glyphs; glyphs alpha-blend over them.
-u16 HighlightTint(Text *ts) {
-  return IsDarkColorMode(ts) ? 0x5A82 /* dark olive */
-                             : 0xFF71 /* soft yellow */;
-}
-
-bool BufIndexInRanges(const std::vector<Book::HighlightRange> &ranges,
-                      int index) {
+// The highlight range covering a buffer index, or null.
+const Book::HighlightRange *
+RangeAtBufIndex(const std::vector<Book::HighlightRange> &ranges, int index) {
   for (size_t r = 0; r < ranges.size(); r++)
     if (index >= ranges[r].buf_begin && index < ranges[r].buf_end)
-      return true;
-  return false;
+      return &ranges[r];
+  return NULL;
 }
 
 bool IsWordSeparator(u32 c) {
@@ -279,7 +275,8 @@ void Page::Draw(Text *ts) {
     capture_words = book->IsWordCaptureEnabled() &&
                     book->GetPageIndex(this) == book->GetPosition();
   }
-  const u16 highlight_tint = HighlightTint(ts);
+  // RGB565 tints drawn behind glyphs; glyphs alpha-blend over them.
+  const bool dark_theme = IsDarkColorMode(ts);
   int open_word = -1;
   int open_word_baseline = 0;
 
@@ -967,10 +964,11 @@ void Page::Draw(Text *ts) {
         glyph_style = TEXT_STYLE_BOLD;
 
       const int glyph_index = (int)i - 1;
-      const bool in_highlight =
-          !highlight_ranges.empty() &&
-          BufIndexInRanges(highlight_ranges, glyph_index);
-      if (in_highlight) {
+      const Book::HighlightRange *highlight =
+          highlight_ranges.empty()
+              ? NULL
+              : RangeAtBufIndex(highlight_ranges, glyph_index);
+      if (highlight) {
         const int advance = (int)ts->GetAdvance(c, glyph_style);
         const int line_h = (int)ts->GetHeight();
         const int y0 = std::max(0, base_pen_y - line_h + 1);
@@ -979,7 +977,8 @@ void Page::Draw(Text *ts) {
         const int x1 = std::min(ts->LogicalWidth(), glyph_x0 + advance);
         if (advance > 0 && x1 > glyph_x0 && y1 > y0)
           ts->FillRect((u16)glyph_x0, (u16)y0, (u16)x1, (u16)y1,
-                       highlight_tint);
+                       highlight_color_utils::Tint(highlight->color,
+                                                   dark_theme));
       }
 
       ts->PrintChar(c, glyph_style);

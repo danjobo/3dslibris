@@ -16,6 +16,7 @@
 #include <stdio.h>
 
 #include "book/book.h"
+#include "book/highlight_color_utils.h"
 #include "book/readwise_export.h"
 #include "ui/text.h"
 #include "book/page.h"
@@ -328,9 +329,9 @@ void AppendHighlightEntries(Book *book, Text *text,
     // changed) still list at their last known page.
     char header[64];
     snprintf(header, sizeof(header),
-             resolved >= 0 ? "Page %d - highlight"
-                           : "Page %d - highlight (not found)",
-             page + 1);
+             resolved >= 0 ? "Page %d - %s highlight"
+                           : "Page %d - %s highlight (not found)",
+             page + 1, highlight_color_utils::Name(a.color));
     std::string label = header;
     std::vector<std::string> quote_lines = WrapTextToLines(
         text, "\"" + SanitizePreviewText(a.quote) + "\"", kPreviewWidth, 1);
