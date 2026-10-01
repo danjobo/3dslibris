@@ -87,6 +87,14 @@ int MainLoopController::RunMainLoop()
     }
 #endif
     gspWaitForVBlank(); // Sync with display refresh to avoid tearing and control frame timing.
+#if PAGE_TIMING
+    {
+      page_timing::Frame &frame = page_timing::Current();
+      frame.start = page_timing::Now();
+      frame.drew = false;
+      frame.stats = page_timing::Stats();
+    }
+#endif
 #ifdef DSLIBRIS_DEBUG
     if (lifecycle_log_budget > 0)
     {
@@ -159,9 +167,30 @@ int MainLoopController::RunMainLoop()
     switch (app_.GetMode())
     {
     case AppMode::Book:
+    {
+#if PAGE_TIMING
+      uint64_t step_start = page_timing::Now();
+#endif
       app_.UpdateStatus();
+#if PAGE_TIMING
+      {
+        // A turn redraws the status bar on the frame after it; the last
+        // real redraw (not the clock-only check) is what's shown.
+        const uint32_t status_us = page_timing::ElapsedUs(step_start);
+        if (status_us >= 1000)
+          page_timing::Last().status_us = status_us;
+      }
+      step_start = page_timing::Now();
+#endif
       app_.HandleEventInBook(input);
+#if PAGE_TIMING
+      // The page draw inside it is counted separately.
+      page_timing::Stats &stats = page_timing::Current().stats;
+      const uint32_t handled = page_timing::ElapsedUs(step_start);
+      stats.handle_us = handled > stats.draw_us ? handled - stats.draw_us : 0;
+#endif
       break;
+    }
 
     case AppMode::Opening:
       app_.UpdateStatus();
@@ -266,11 +295,25 @@ int MainLoopController::RunMainLoop()
 #if PAGE_TIMING
       const uint64_t present_start = page_timing::Now();
       if (app_.PresentIfDirty() && app_.GetMode() == AppMode::Book)
-        page_timing::Last().present_us = page_timing::ElapsedUs(present_start);
+        page_timing::Current().stats.present_us =
+            page_timing::ElapsedUs(present_start);
 #else
       app_.PresentIfDirty();
 #endif
     }
+#if PAGE_TIMING
+    {
+      page_timing::Frame &frame = page_timing::Current();
+      if (frame.drew && app_.GetMode() == AppMode::Book)
+      {
+        frame.stats.frame_us = page_timing::ElapsedUs(frame.start);
+        frame.stats.status_us = page_timing::Last().status_us;
+        page_timing::Last() = frame.stats;
+        // Redraw the status bar with the new numbers.
+        app_.RequestStatusRedraw();
+      }
+    }
+#endif
   }
   app_.PersistPrefs();
   return 0;

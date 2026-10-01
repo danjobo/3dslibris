@@ -322,10 +322,13 @@ void StatusController::UpdateStatus()
     if (mode == AppMode::Book)
     {
       const page_timing::Stats &timing = page_timing::Last();
-      char timing_text[32];
-      snprintf(timing_text, sizeof(timing_text), "d%u p%u",
+      char timing_text[48];
+      snprintf(timing_text, sizeof(timing_text), "d%u h%u s%u p%u f%u",
                (unsigned)(timing.draw_us / 1000),
-               (unsigned)(timing.present_us / 1000));
+               (unsigned)(timing.handle_us / 1000),
+               (unsigned)(timing.status_us / 1000),
+               (unsigned)(timing.present_us / 1000),
+               (unsigned)(timing.frame_us / 1000));
       const int tw = app_.ts->GetStringWidth(timing_text, TEXT_STYLE_BROWSER);
       const int tx = right_edge - tw;
       app_.ts->SetPen(tx, textY);

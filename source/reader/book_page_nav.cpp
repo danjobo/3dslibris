@@ -26,7 +26,8 @@ void DrawPage(Book *book, Text *ts) {
 #endif
   book_renderer::DrawCurrentView(book, ts);
 #if PAGE_TIMING
-  page_timing::Last().draw_us = page_timing::ElapsedUs(start);
+  page_timing::Current().stats.draw_us += page_timing::ElapsedUs(start);
+  page_timing::Current().drew = true;
 #endif
 }
 
