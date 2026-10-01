@@ -58,6 +58,10 @@ private:
   void StopNetwork();
   void StartHost();
   void StartJoin();
+  // Local wireless without a code: pairs with a nearby console doing the
+  // same.
+  void StartNearby();
+  bool UsingLocalWireless() const { return local_wireless_ || nearby_; }
   void StartSession();
   void EndSession();
   void ShowError(const std::string &message);
@@ -108,6 +112,8 @@ private:
 
   // Connection type chosen on the menu (kept while the app runs).
   bool local_wireless_;
+  // This session is a nearby (no code) one.
+  bool nearby_ = false;
   uint32_t *soc_buffer_;
   bool soc_ready_;
 };

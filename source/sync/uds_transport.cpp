@@ -28,6 +28,12 @@ const size_t kScanBufferSize = 0x4000;
 const uint64_t kStatusIntervalMs = 500;
 const int kMaxPacketsPerPoll = 64;
 const s64 kScanPauseNs = 200 * 1000 * 1000LL;
+// Nearby mode: how long each console searches, then hosts, per round.
+const uint64_t kNearbySearchMinMs = 1500;
+const uint64_t kNearbySearchMaxMs = 3000;
+const uint64_t kNearbyHostMinMs = 3000;
+const uint64_t kNearbyHostMaxMs = 6000;
+const char kNearbyCode[] = "nearby";
 
 const char kBeaconMagic[4] = {'3', 'L', 'S', 'Y'};
 const size_t kBeaconNameMax = 32;
@@ -58,9 +64,12 @@ std::string ResultText(const char *what, Result rc) {
 UdsTransport::UdsTransport(Role role, const std::string &name,
                            const std::string &code)
     : role_(role), name_(name), code_(code), state_(kWaiting),
-      uds_ready_(false), network_up_(false), peer_node_(0),
-      last_status_ms_(0), join_thread_(NULL), join_stop_(false),
-      join_done_(false), join_connected_(false) {
+      uds_ready_(false), network_up_(false), hosting_(false),
+      nearby_switch_ms_(0),
+      random_state_((uint32_t)svcGetSystemTick() ^ (uint32_t)osGetTime()),
+      peer_node_(0), last_status_ms_(0), join_thread_(NULL),
+      join_stop_(false), join_deadline_ms_(0), join_done_(false),
+      join_connected_(false) {
   memset(&bind_, 0, sizeof(bind_));
   LightLock_Init(&join_lock_);
 }
@@ -79,7 +88,24 @@ UdsTransport *UdsTransport::CreateJoin(const std::string &name,
   return t;
 }
 
+UdsTransport *UdsTransport::CreateNearby(const std::string &name) {
+  UdsTransport *t = new UdsTransport(kNearby, name, kNearbyCode);
+  t->Start();
+  return t;
+}
+
+const char *UdsTransport::NearbyCode() { return kNearbyCode; }
+
 UdsTransport::~UdsTransport() { Shutdown(); }
+
+uint64_t UdsTransport::RandomMs(uint64_t lo, uint64_t hi) {
+  // xorshift32, seeded from the tick counter: the two consoles differ.
+  random_state_ ^= random_state_ << 13;
+  random_state_ ^= random_state_ >> 17;
+  random_state_ ^= random_state_ << 5;
+  random_state_ ^= (uint32_t)svcGetSystemTick();
+  return lo + (hi > lo ? random_state_ % (uint32_t)(hi - lo) : 0);
+}
 
 void UdsTransport::Fail(const std::string &message) {
   if (state_ == kFailed || state_ == kClosed)
@@ -98,19 +124,34 @@ bool UdsTransport::Start() {
   }
   uds_ready_ = true;
 
-  if (role_ == kJoin) {
-    s32 priority = 0x30;
-    svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
-    // Lower priority than the main loop so drawing stays smooth.
-    join_thread_ = threadCreate(&UdsTransport::JoinThreadMain, this, 0x4000,
-                                priority + 1, -2, false);
-    if (!join_thread_) {
-      Fail("Couldn't start searching");
-      return false;
-    }
-    return true;
-  }
+  if (role_ == kJoin)
+    return StartJoinThread(0);
+  if (role_ == kNearby)
+    return StartJoinThread(osGetTime() +
+                           RandomMs(kNearbySearchMinMs, kNearbySearchMaxMs));
+  return StartHosting();
+}
 
+bool UdsTransport::StartJoinThread(uint64_t deadline_ms) {
+  join_stop_ = false;
+  join_done_ = false;
+  join_connected_ = false;
+  join_error_.clear();
+  join_deadline_ms_ = deadline_ms;
+  s32 priority = 0x30;
+  svcGetThreadPriority(&priority, CUR_THREAD_HANDLE);
+  // Lower priority than the main loop so drawing stays smooth.
+  join_thread_ = threadCreate(&UdsTransport::JoinThreadMain, this, 0x4000,
+                              priority + 1, -2, false);
+  if (!join_thread_) {
+    Fail("Couldn't start searching");
+    return false;
+  }
+  return true;
+}
+
+bool UdsTransport::StartHosting() {
+  Result rc;
   udsNetworkStruct network;
   udsGenerateDefaultNetworkStruct(&network, kCommId, kNetworkId8, 2);
   const std::string pass = Passphrase(code_);
@@ -123,6 +164,7 @@ bool UdsTransport::Start() {
     return false;
   }
   network_up_ = true;
+  hosting_ = true;
 
   Beacon beacon;
   memset(&beacon, 0, sizeof(beacon));
@@ -151,7 +193,8 @@ void UdsTransport::RunJoinSearch() {
   std::string host_name;
   int connect_failures = 0;
 
-  while (scan_buf && !join_stop_ && !connected && connect_failures < 3) {
+  while (scan_buf && !join_stop_ && !connected && connect_failures < 3 &&
+         (join_deadline_ms_ == 0 || osGetTime() < join_deadline_ms_)) {
     udsNetworkScanInfo *networks = NULL;
     size_t total = 0;
     memset(scan_buf, 0, kScanBufferSize);
@@ -222,7 +265,7 @@ void UdsTransport::CheckConnection(uint64_t now_ms) {
   udsConnectionStatus status;
   if (R_FAILED(udsGetConnectionStatus(&status)))
     return;
-  if (state_ == kWaiting && role_ == kHost && status.total_nodes >= 2) {
+  if (state_ == kWaiting && hosting_ && status.total_nodes >= 2) {
     // The first client: the lowest node id other than the host's (bit 0).
     for (int bit = 1; bit < UDS_MAXNODES; bit++) {
       if (status.node_bitmask & (1u << bit)) {
@@ -268,7 +311,11 @@ void UdsTransport::PumpPackets(uint64_t now_ms) {
 void UdsTransport::Poll(uint64_t now_ms) {
   if (state_ == kFailed || state_ == kClosed)
     return;
-  if (role_ == kJoin && state_ == kWaiting) {
+  if (role_ == kNearby && state_ == kWaiting) {
+    PollNearby(now_ms);
+    if (state_ != kWaiting && state_ != kConnected)
+      return;
+  } else if (role_ == kJoin && state_ == kWaiting) {
     LightLock_Lock(&join_lock_);
     const bool done = join_done_;
     const bool connected = join_connected_;
@@ -290,6 +337,47 @@ void UdsTransport::Poll(uint64_t now_ms) {
     PumpPackets(now_ms);
 }
 
+void UdsTransport::StopHosting() {
+  if (!network_up_ || !hosting_)
+    return;
+  udsDestroyNetwork();
+  udsUnbind(&bind_);
+  memset(&bind_, 0, sizeof(bind_));
+  network_up_ = false;
+  hosting_ = false;
+}
+
+void UdsTransport::PollNearby(uint64_t now_ms) {
+  if (join_thread_) {
+    // Searching.
+    LightLock_Lock(&join_lock_);
+    const bool done = join_done_;
+    const bool connected = join_connected_;
+    LightLock_Unlock(&join_lock_);
+    if (!done)
+      return;
+    StopJoinThread();
+    if (connected) {
+      network_up_ = true;
+      hosting_ = false;
+      peer_node_ = UDS_HOST_NETWORKNODEID;
+      state_ = kConnected;
+      return;
+    }
+    // Nobody hosting yet: host for a while ourselves.
+    if (!StartHosting())
+      return;
+    nearby_switch_ms_ = now_ms + RandomMs(kNearbyHostMinMs, kNearbyHostMaxMs);
+    return;
+  }
+  // Hosting: a joiner turns this into a connection (CheckConnection).
+  CheckConnection(now_ms);
+  if (state_ != kWaiting || now_ms < nearby_switch_ms_)
+    return;
+  StopHosting();
+  StartJoinThread(now_ms + RandomMs(kNearbySearchMinMs, kNearbySearchMaxMs));
+}
+
 void UdsTransport::Send(const std::string &bytes) { link_.Queue(bytes); }
 
 std::string UdsTransport::TakeReceived() { return link_.TakeReceived(); }
@@ -297,12 +385,13 @@ std::string UdsTransport::TakeReceived() { return link_.TakeReceived(); }
 void UdsTransport::Shutdown() {
   StopJoinThread();
   if (network_up_) {
-    if (role_ == kHost)
+    if (hosting_)
       udsDestroyNetwork();
     else
       udsDisconnectNetwork();
     udsUnbind(&bind_);
     network_up_ = false;
+    hosting_ = false;
   }
   if (uds_ready_) {
     udsExit();

@@ -35,7 +35,7 @@ namespace {
 
 static const u32 kSocBufferSize = 0x100000;
 // host, join, connection type
-static const int kMenuOptionCount = 3;
+static const int kMenuOptionCount = 4;
 static const int kMenuButtonX = 5;
 static const int kMenuButtonY0 = 70;
 static const int kMenuButtonStride = 46;
@@ -344,7 +344,21 @@ bool SyncController::OpenTransport(bool host) {
   return true;
 }
 
+void SyncController::StartNearby() {
+  nearby_ = true;
+  pairing_code_ = UdsTransport::NearbyCode();
+  transport_.reset(UdsTransport::CreateNearby(DeviceName()));
+  if (transport_->GetState() == SyncTransport::kFailed) {
+    ShowError(transport_->Error());
+    return;
+  }
+  StartSession();
+  screen_ = kJoining;
+  dirty_ = true;
+}
+
 void SyncController::StartHost() {
+  nearby_ = false;
   char code[8];
   snprintf(code, sizeof(code), "%04u",
            (unsigned)(console_id::Generate(osGetTime() ^ svcGetSystemTick()) %
@@ -358,6 +372,7 @@ void SyncController::StartHost() {
 }
 
 void SyncController::StartJoin() {
+  nearby_ = false;
   std::string code;
   const bool entered = AskPairingCode(&code);
   // The keyboard applet replaced both screens.
@@ -637,10 +652,12 @@ void SyncController::RunFrame(const FrameInput &input) {
       }
     }
     if (chosen == 0) {
-      StartHost();
+      StartNearby();
     } else if (chosen == 1) {
-      StartJoin();
+      StartHost();
     } else if (chosen == 2) {
+      StartJoin();
+    } else if (chosen == 3) {
       local_wireless_ = !local_wireless_;
       dirty_ = true;
     }
@@ -730,7 +747,7 @@ void SyncController::DrawPicker(int y) {
   if (chosen > 0)
     snprintf(line, sizeof(line), "%d of %d: %s (~%s)", chosen,
              (int)missing_.size(), FormatSize(chosen_bytes).c_str(),
-             FormatDuration(chosen_bytes / (local_wireless_
+             FormatDuration(chosen_bytes / (UsingLocalWireless()
                                                 ? kLocalBytesPerSec
                                                 : kWifiBytesPerSec))
                  .c_str());
@@ -835,10 +852,8 @@ void SyncController::Draw() {
   std::vector<std::string> lines;
   switch (screen_) {
   case kMenu:
-    lines.push_back(local_wireless_
-                        ? "Local wireless: no router needed. Keep the "
-                          "consoles close, with this screen open."
-                        : "Both consoles: same Wi-Fi, this screen open.");
+    lines.push_back("Nearby: no code or router. Choose it on both "
+                    "consoles, side by side.");
     break;
   case kHosting:
     lines.push_back("This 3DS: " + DeviceName());
@@ -853,7 +868,12 @@ void SyncController::Draw() {
     break;
   case kJoining:
     lines.push_back("This 3DS: " + DeviceName());
-    if (local_wireless_) {
+    if (nearby_) {
+      lines.push_back("Looking for a 3DS nearby...");
+      lines.push_back("");
+      lines.push_back("On the other 3DS choose");
+      lines.push_back("\"sync with a nearby 3DS\".");
+    } else if (local_wireless_) {
       lines.push_back("Looking for a host nearby with");
       lines.push_back("code " + pairing_code_ + "...");
     } else {
@@ -933,11 +953,11 @@ void SyncController::Draw() {
 
   if (screen_ == kMenu) {
     const char *labels[kMenuOptionCount] = {
-        "host a sync", "join a sync",
+        "sync with a nearby 3DS", "host a sync", "join a sync",
         local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi"};
-    const char *hints[kMenuOptionCount] = {"show a pairing code here >",
-                                           "enter the host's code >",
-                                           "both consoles must match >"};
+    const char *hints[kMenuOptionCount] = {
+        "local wireless, no code >", "show a pairing code here >",
+        "enter the host's code >", "for host / join; both must match >"};
     for (int i = 0; i < kMenuOptionCount; i++) {
       Button button(ts);
       LayoutMenuButton(&button, i);

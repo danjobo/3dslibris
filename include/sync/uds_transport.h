@@ -7,6 +7,12 @@
     for a beacon with its code's hash and connects. The network passphrase
     includes the pairing code, so only a console with the code can join.
 
+    "Nearby" mode needs no code: both consoles choose it, and each one
+    alternates between searching for the other (a random 1.5-3 s) and
+    hosting (a random 3-6 s) until one finds the other. The random timing
+    keeps the two from staying in the same role. Any console nearby in this
+    mode can connect, so it's for consoles side by side.
+
     Frames are small and can be lost, so the byte stream runs over a
     ReliableLink. Scanning and connecting block for a while, so the joiner
     does them on a worker thread; everything else is polled from the main
@@ -30,6 +36,10 @@ public:
                                   const std::string &pairing_code);
   static UdsTransport *CreateJoin(const std::string &name,
                                   const std::string &pairing_code);
+  // No code: pairs with another console in nearby mode (see above).
+  static UdsTransport *CreateNearby(const std::string &name);
+  // The pairing code both consoles use in nearby mode (for SyncSession).
+  static const char *NearbyCode();
   ~UdsTransport();
 
   void Poll(uint64_t now_ms) override;
@@ -43,10 +53,17 @@ public:
   void Close() override;
 
 private:
-  enum Role { kHost, kJoin };
+  enum Role { kHost, kJoin, kNearby };
 
   UdsTransport(Role role, const std::string &name, const std::string &code);
   bool Start();
+  // Host role: create the network and announce it.
+  bool StartHosting();
+  bool StartJoinThread(uint64_t deadline_ms);
+  void StopHosting();
+  // Nearby mode: switch between searching and hosting.
+  void PollNearby(uint64_t now_ms);
+  uint64_t RandomMs(uint64_t lo, uint64_t hi);
   void Fail(const std::string &message);
   void PumpPackets(uint64_t now_ms);
   void CheckConnection(uint64_t now_ms);
@@ -62,6 +79,9 @@ private:
   std::string error_;
   bool uds_ready_;
   bool network_up_; // created (host) or connected (join)
+  bool hosting_;    // this console created the network
+  uint64_t nearby_switch_ms_; // nearby: when to stop hosting and search
+  uint32_t random_state_;
   udsBindContext bind_;
   u16 peer_node_;
   ReliableLink link_;
@@ -71,6 +91,7 @@ private:
   Thread join_thread_;
   LightLock join_lock_;
   volatile bool join_stop_;
+  uint64_t join_deadline_ms_; // 0 = search until found
   bool join_done_;
   bool join_connected_;
   std::string join_error_;
