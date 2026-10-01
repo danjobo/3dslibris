@@ -4,7 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
-#include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -73,8 +73,7 @@ int OpenBoundSocket(int type, uint16_t port) {
 WifiTransport::WifiTransport(bool host, const std::string &name,
                              const Options &options)
     : host_(host), name_(name), options_(options), state_(kWaiting),
-      udp_fd_(-1), listen_fd_(-1), stream_fd_(-1), connecting_(false),
-      next_discovery_ms_(0) {}
+      udp_fd_(-1), listen_fd_(-1), stream_fd_(-1), next_discovery_ms_(0) {}
 
 WifiTransport::~WifiTransport() { Close(); }
 
@@ -90,6 +89,14 @@ WifiTransport *WifiTransport::CreateJoin(const std::string &name,
   WifiTransport *t = new WifiTransport(false, name, options);
   t->StartJoin();
   return t;
+}
+
+void WifiTransport::FailWithErrno(const char *what) {
+  // The error number tells a refused connection from a timeout or a
+  // network problem when diagnosing on hardware.
+  char message[128];
+  snprintf(message, sizeof(message), "%s (error %d)", what, errno);
+  Fail(message);
 }
 
 void WifiTransport::Fail(const char *what) {
@@ -129,8 +136,6 @@ void WifiTransport::Poll(uint64_t now_ms) {
   if (state_ == kWaiting) {
     if (host_)
       PollHostWaiting();
-    else if (connecting_)
-      PollConnecting();
     else
       PollJoinWaiting(now_ms);
   }
@@ -157,7 +162,7 @@ void WifiTransport::PollHostWaiting() {
   const int fd = accept(listen_fd_, (sockaddr *)&peer, &peer_len);
   if (fd < 0) {
     if (!WouldBlock())
-      Fail("Waiting for the other 3DS failed");
+      FailWithErrno("Waiting for the other 3DS failed");
     return;
   }
   if (!SetNonBlocking(fd)) {
@@ -203,39 +208,24 @@ void WifiTransport::PollJoinWaiting(uint64_t now_ms) {
                     (size_t)n - (sizeof(kAnnounceMsg) - 1));
 
   stream_fd_ = socket(AF_INET, SOCK_STREAM, 0);
-  if (stream_fd_ < 0 || !SetNonBlocking(stream_fd_)) {
-    Fail("Couldn't open a connection");
+  if (stream_fd_ < 0) {
+    FailWithErrno("Couldn't open a connection");
     return;
   }
   sockaddr_in host = from;
   host.sin_port = htons(options_.stream_port);
-  if (connect(stream_fd_, (sockaddr *)&host, sizeof(host)) == 0) {
-    CloseFd(&udp_fd_);
-    state_ = kConnected;
+  // Blocking connect: the 3DS socket service doesn't reliably report when a
+  // non-blocking connect completes (it reported failure for connections the
+  // host had already accepted). The host just answered on the local
+  // network, so this takes milliseconds.
+  if (connect(stream_fd_, (sockaddr *)&host, sizeof(host)) != 0) {
+    FailWithErrno("Couldn't connect to the other 3DS");
     return;
   }
-  if (!WouldBlock()) {
-    Fail("Couldn't connect to the other 3DS");
+  if (!SetNonBlocking(stream_fd_)) {
+    FailWithErrno("Couldn't set up the connection");
     return;
   }
-  connecting_ = true;
-}
-
-void WifiTransport::PollConnecting() {
-  pollfd p;
-  p.fd = stream_fd_;
-  p.events = POLLOUT;
-  p.revents = 0;
-  if (poll(&p, 1, 0) <= 0)
-    return;
-  int err = 0;
-  socklen_t len = sizeof(err);
-  getsockopt(stream_fd_, SOL_SOCKET, SO_ERROR, &err, &len);
-  if (err != 0 || (p.revents & (POLLERR | POLLHUP))) {
-    Fail("Couldn't connect to the other 3DS");
-    return;
-  }
-  connecting_ = false;
   CloseFd(&udp_fd_);
   state_ = kConnected;
 }
@@ -255,7 +245,7 @@ void WifiTransport::PollStream() {
     }
     if (n < 0 && WouldBlock())
       break;
-    Fail("Connection lost");
+    FailWithErrno("Connection lost while sending");
     return;
   }
 
@@ -273,7 +263,7 @@ void WifiTransport::PollStream() {
     }
     if (WouldBlock())
       break;
-    Fail("Connection lost");
+    FailWithErrno("Connection lost while receiving");
     return;
   }
 }

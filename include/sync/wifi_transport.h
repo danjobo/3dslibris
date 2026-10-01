@@ -57,9 +57,9 @@ private:
   bool StartJoin();
   void PollHostWaiting();
   void PollJoinWaiting(uint64_t now_ms);
-  void PollConnecting();
   void PollStream();
   void Fail(const char *what);
+  void FailWithErrno(const char *what);
 
   bool host_;
   std::string name_;
@@ -68,7 +68,6 @@ private:
   int udp_fd_;
   int listen_fd_;
   int stream_fd_;
-  bool connecting_;
   uint64_t next_discovery_ms_;
   std::string outbox_;
   std::string inbox_;
