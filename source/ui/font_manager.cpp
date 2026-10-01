@@ -257,12 +257,24 @@ void FontManager::ReportFace(FT_Face face) {
   }
 }
 
+namespace {
+
+// Rendered glyphs are kept per size: a page that changes size (headings,
+// smaller text, superscripts) would otherwise re-render every glyph.
+u32 GlyphKey(FT_Face face, u32 ucs) {
+  const unsigned ppem = face && face->size ? face->size->metrics.y_ppem : 0;
+  return ((u32)(ppem > 255 ? 255 : ppem) << 24) | (ucs & 0x00FFFFFFu);
+}
+
+} // namespace
+
 int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
   if (!face || !face_cache)
     return -1;
+  const u32 key = GlyphKey(face, ucs);
   uint32_t evicted_ucs = 0;
-  if (face_cache->lru.Insert(ucs, &evicted_ucs)) {
+  if (face_cache->lru.Insert(key, &evicted_ucs)) {
     auto evicted =
         face_cache->cacheMap.find(evicted_ucs);
     if (evicted != face_cache->cacheMap.end()) {
@@ -289,7 +301,7 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   dst->bitmap_top = src->bitmap_top;
   dst->bitmap_left = src->bitmap_left;
   dst->advance = src->advance;
-  face_cache->cacheMap.insert(std::make_pair(ucs, dst));
+  face_cache->cacheMap.insert(std::make_pair(key, dst));
   return ucs;
 }
 
@@ -323,11 +335,12 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (face && fallback_count_ > 0) {
     Cache *primary_cache = text_cache_utils::FindFaceCache(textCache, face);
     if (primary_cache) {
-      auto fast_iter = primary_cache->cacheMap.find(ucs);
+      const u32 key = GlyphKey(face, ucs);
+      auto fast_iter = primary_cache->cacheMap.find(key);
       if (fast_iter != primary_cache->cacheMap.end()) {
         if (parent->tr)
           parent->tr->SetHit(true);
-        primary_cache->lru.Touch(ucs);
+        primary_cache->lru.Touch(key);
         return fast_iter->second;
       }
     }
@@ -366,11 +379,12 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     FT_Load_Char(face, ucs, flags);
     return face->glyph;
   }
-  auto iter = face_cache->cacheMap.find(ucs);
+  const u32 key = GlyphKey(face, ucs);
+  auto iter = face_cache->cacheMap.find(key);
   if (iter != face_cache->cacheMap.end()) {
     if (parent->tr)
       parent->tr->SetHit(true);
-    face_cache->lru.Touch(ucs);
+    face_cache->lru.Touch(key);
     return iter->second;
   }
 
@@ -378,7 +392,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     parent->tr->SetHit(false);
   int i = CacheGlyph(ucs, face);
   if (i >= 0)
-    return face_cache->cacheMap[ucs];
+    return face_cache->cacheMap[key];
 
   FT_Load_Char(face, ucs, flags);
   return face->glyph;
@@ -579,8 +593,8 @@ void FontManager::SetPixelSize(u8 size) {
     for (auto &it : faces) {
       if (it.first == TEXT_STYLE_BROWSER)
         continue;
+      // Cached glyphs are keyed by size, so they stay valid.
       FT_Set_Pixel_Sizes(it.second, 0, pixelsize);
-      ClearRenderCache(it.second);
     }
   }
 }

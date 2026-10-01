@@ -204,8 +204,8 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
     // whose source-space footprint overlaps it. Prevents missing strokes from
     // nearest-neighbor skipping at scale ~0.70 (inv_s ~1.43).
     // Alternative: render at scaled pixelsize via SetPixelSize(size*s) for
-    // native FreeType hinting. Costs ~2 full glyph-cache flushes per
-    // superscript character (SetPixelSize clears render cache each call).
+    // native FreeType hinting (glyphs are cached per size, so that would
+    // cost a size change per superscript run, not a cache flush).
     const float inv_s = 1.0f / s;
     const int src_w = (int)width;
     const int src_h = (int)height;
