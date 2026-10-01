@@ -240,6 +240,10 @@ int MainLoopController::RunMainLoop()
     case AppMode::Readwise:
       app_.RunReadwiseFrame(input);
       break;
+
+    case AppMode::Hardcover:
+      app_.RunHardcoverFrame(input);
+      break;
     }
 
     if (app_.GetMode() == AppMode::Quit)

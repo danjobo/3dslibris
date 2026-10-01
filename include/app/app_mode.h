@@ -19,4 +19,5 @@ enum class AppMode : u8
   Sync = 12,
   DeleteBook = 13,
   Readwise = 14,
+  Hardcover = 15,
 };

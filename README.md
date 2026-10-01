@@ -27,6 +27,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Supported formats: `EPUB`, `FB2`, `TXT`, `RTF`, `ODT`, `MOBI`, `PDF`, `CBZ` and `XPS`.
 - `EPUB` reflow with TOC support, bookmarks, `go to page`, cached pagination, and broad inline/block formatting support.
 - Highlights (five colors, including across a page break) and notes in reflowable books, listed with bookmarks for quick jumps and kept across font and layout changes. Upload them to Readwise over Wi-Fi, or export a CSV for its import.
+- Track reading progress on Hardcover: link a book once and progress (and finishing it) is sent when you leave the book.
 - Sync reading positions, bookmarks, highlights and notes with another 3DS over Wi-Fi or local wireless (host / join with a pairing code), and copy books only one console has.
 - Fixed-layout viewer for manga and document formats (`CBZ`, `PDF` and `XPS`) with zoom, pan, outline navigation, and full-page preview.
 - Bundled fallback fonts for broader language coverage (Latin, Cyrillic, Greek, CJK, Arabic, Hebrew, Thai, and more).

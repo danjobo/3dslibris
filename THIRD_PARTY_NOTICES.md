@@ -63,6 +63,12 @@ the corresponding source for that binary available.
 - libcurl: curl license (MIT/X derivative), https://curl.se/docs/copyright.html
 - mbedTLS: Apache License 2.0, https://github.com/Mbed-TLS/mbedtls
 
+### Jansson (devkitPro portlibs)
+
+- Linked from the devkitPro `3ds-jansson` package to read JSON replies
+  from web services (Hardcover).
+- License: MIT, https://github.com/akheron/jansson
+
 ### Mozilla CA certificate bundle
 
 - `sdmc/3ds/3dslibris/resources/cacert.pem`, as published by the curl

@@ -127,6 +127,17 @@ Readwise (GENERAL settings, second page > Readwise):
   exports just this book
 - Dates use the console clock, which Readwise reads as UTC
 
+Hardcover (reading progress, hardcover.app):
+- Put your API token (hardcover.app > Settings > API) in
+  `sdmc:/3ds/3dslibris/hardcover-token.txt`. "Bearer " in front is fine
+- While reading: BOOK settings > book info, then X opens Hardcover
+- "find on Hardcover" searches by the ISBN in the file name (exact
+  edition), then by title and author; pick the right book from the list
+- After that, leaving the book sends your progress (scaled to the
+  Hardcover edition's page count) and marks it Reading, or Read on the
+  last page. No Wi-Fi: nothing is sent and nothing is shown
+- "send progress now" sends it straight away; "unlink" forgets the link
+
 Other:
 - X: cycle theme (normal / dark / sepia)
 - Start: return to library

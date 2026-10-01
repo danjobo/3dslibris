@@ -12,6 +12,7 @@
 #include "app/sync_controller.h"
 #include "app/delete_book_controller.h"
 #include "app/readwise_controller.h"
+#include "app/hardcover_controller.h"
 #include "app/library_controller.h"
 
 #include <3ds.h>
@@ -53,6 +54,16 @@ void App::ShowFontView(AppMode app_font_mode)
 
 void App::ShowLibraryView()
 {
+  // Leaving a book linked to Hardcover: send its progress first (this
+  // comes back here when done).
+  if (GetCurrentBook() &&
+      hardcover_controller_->WantsSendOnClose(GetCurrentBook()))
+  {
+    ApplyRenderOrientation(portrait_orientation);
+    nav_.mode = AppMode::Hardcover;
+    hardcover_controller_->ShowSendOnClose(GetCurrentBook());
+    return;
+  }
   ApplyRenderOrientation(portrait_orientation);
   // Reset shared bottom buttons immediately; prefs view reuses/moves them.
   buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
@@ -240,6 +251,13 @@ void App::ShowSyncView()
   ApplyRenderOrientation(portrait_orientation);
   nav_.mode = AppMode::Sync;
   sync_controller_->Show();
+}
+
+void App::ShowHardcoverView(Book *book)
+{
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::Hardcover;
+  hardcover_controller_->Show(book);
 }
 
 void App::ShowReadwiseView()

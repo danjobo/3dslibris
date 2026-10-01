@@ -10,6 +10,7 @@
 #include "app/sync_controller.h"
 #include "app/delete_book_controller.h"
 #include "app/readwise_controller.h"
+#include "app/hardcover_controller.h"
 
 #include <3ds.h>
 #include <ctype.h>
@@ -677,6 +678,11 @@ void App::RunReadwiseFrame(const FrameInput &input)
   readwise_controller_->RunFrame(input);
 }
 
+void App::RunHardcoverFrame(const FrameInput &input)
+{
+  hardcover_controller_->RunFrame(input);
+}
+
 void App::RunBookmarksMenuFrame(const FrameInput &input)
 {
   bookmarkmenu->HandleInput(input);
@@ -753,6 +759,10 @@ void App::RunChaptersMenuFrame(const FrameInput &input)
 void App::RunBookInfoFrame(const FrameInput &input)
 {
   const u32 keys = input.keys_down;
+  if ((keys & KEY_X) && reader_state_.bookcurrent) {
+    ShowHardcoverView(reader_state_.bookcurrent);
+    return;
+  }
   if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y | KEY_A)) {
     ShowSettingsView(true);
     return;
@@ -938,9 +948,9 @@ void App::RunBookInfoFrame(const FrameInput &input)
   }
 
   ts->SetPen(8, footer_text_y);
-  char pager[24];
-  snprintf(pager, sizeof(pager), "page %d/%d", (int)nav_.book_info_page + 1,
-           kBookInfoPageCount);
+  char pager[48];
+  snprintf(pager, sizeof(pager), "page %d/%d    X: Hardcover",
+           (int)nav_.book_info_page + 1, kBookInfoPageCount);
   ts->PrintString(pager);
 
   buttonback.Draw(false);
