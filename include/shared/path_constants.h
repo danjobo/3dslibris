@@ -127,6 +127,12 @@ inline const std::string &GetAnnotationsDir() {
   return path;
 }
 
+// Exported files (e.g. Readwise highlight CSVs) for copying to a PC.
+inline const std::string &GetExportsDir() {
+  static const std::string path = GetSdmcBase() + "/exports";
+  return path;
+}
+
 inline const std::string &GetCacheBaseDir() {
   static const std::string path = GetSdmcBase() + "/cache";
   return path;

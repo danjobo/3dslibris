@@ -16,6 +16,7 @@
 #include <stdio.h>
 
 #include "book/book.h"
+#include "book/readwise_export.h"
 #include "ui/text.h"
 #include "book/page.h"
 #include "shared/text_token_constants.h"
@@ -228,10 +229,31 @@ static std::vector<std::string> WrapTextToLines(Text *ts,
 
 }
 
+static const char *kBookmarkMenuTitle = "bookmarks & notes  X:export";
+
 BookmarkMenu::BookmarkMenu(App *_app)
-    : PagedListMenu(_app, "bookmarks & notes") {}
+    : PagedListMenu(_app, kBookmarkMenuTitle) {}
 
 BookmarkMenu::~BookmarkMenu() {}
+
+void BookmarkMenu::HandleInput(const FrameInput &input) {
+  if ((input.keys_down & KEY_X) && current_book_) {
+    std::vector<Book *> books(1, current_book_);
+    const readwise_export::Result result = readwise_export::ExportBooks(books);
+    char title[64];
+    if (result.ok)
+      snprintf(title, sizeof(title), "exported %d highlight%s",
+               result.highlights, result.highlights == 1 ? "" : "s");
+    else if (result.highlights == 0)
+      snprintf(title, sizeof(title), "no highlights to export");
+    else
+      snprintf(title, sizeof(title), "export failed (SD card?)");
+    SetHeaderTitle(title);
+    SetDirty();
+    return;
+  }
+  PagedListMenu::HandleInput(input);
+}
 
 
 namespace {
@@ -334,6 +356,7 @@ void AppendHighlightEntries(Book *book, Text *text,
 void BookmarkMenu::BuildEntries(Book *book, Text *text,
                                 std::vector<std::string> &labels,
                                 std::vector<u16> &pages) {
+  SetHeaderTitle(kBookmarkMenuTitle);
   if (!book)
     return;
 

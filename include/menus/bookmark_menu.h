@@ -21,6 +21,10 @@ public:
   BookmarkMenu(class App *app);
   ~BookmarkMenu();
 
+  // X exports this book's highlights to a Readwise CSV; everything else is
+  // the regular list handling.
+  void HandleInput(const FrameInput &input) override;
+
 private:
   void BuildEntries(class Book *book, class Text *text,
                     std::vector<std::string> &labels,

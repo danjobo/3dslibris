@@ -87,6 +87,16 @@ Highlights & notes:
 - They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
   font size and layout changes and clearing the cache
 
+Exporting highlights to Readwise:
+- In BOOK settings > bookmarks & notes, press X to export this book's
+  highlights and notes
+- In GENERAL settings (second page) > export highlights exports every
+  book at once
+- Files are written to `sdmc:/3ds/3dslibris/exports/` as
+  readwise-<date>-<time>.csv
+- Copy the file to a computer and upload it at readwise.io (Import >
+  CSV). Dates use the console clock, which Readwise reads as UTC.
+
 Other:
 - X: cycle theme (normal / dark / sepia)
 - Start: return to library

@@ -37,6 +37,8 @@ private:
 
   void ResetToDefaults();
   void ClearAllCaches();
+  // Writes every book's highlights to a Readwise CSV in the exports folder.
+  void ExportAllHighlights();
   int EffectiveVisibleCount() const;
   int EffectiveButtonForSlot(int slot) const;
   void GoToPrefsPage(int page);

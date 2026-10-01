@@ -23,7 +23,7 @@ int main() {
 
   page.page = 2;
   test::ExpectEq("unified general options page count",
-                 settings::PrefsPageButtonCount(page), 6);
+                 settings::PrefsPageButtonCount(page), 7);
   test::ExpectEq("unified general options page first button",
                  settings::PrefsPageButtonForSlot(page, 0),
                  PREFS_BUTTON_ORIENTATION);
@@ -73,7 +73,7 @@ int main() {
                  PREFS_BUTTON_LIBRARY_SORT);
 
   test::ExpectEq("general page 2 button count",
-                 settings::ExtraPrefsButtonCount(), 6);
+                 settings::ExtraPrefsButtonCount(), 7);
   test::ExpectEq("general page 2 orientation first",
                  settings::ExtraPrefsButtonForSlot(0),
                  PREFS_BUTTON_ORIENTATION);
@@ -92,6 +92,9 @@ int main() {
   test::ExpectEq("general page 2 clear cache",
                  settings::ExtraPrefsButtonForSlot(5),
                  PREFS_BUTTON_CLEAR_CACHE);
+  test::ExpectEq("general page 2 export highlights",
+                 settings::ExtraPrefsButtonForSlot(6),
+                 PREFS_BUTTON_EXPORT_HIGHLIGHTS);
 
   test::ExpectEq("reflow page 1 slot 0",
                  settings::PrefsButtonForVisibleSlot(true, false, 0),
