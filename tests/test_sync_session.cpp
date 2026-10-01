@@ -3,6 +3,7 @@
 #include "test_assert.h"
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -124,6 +125,55 @@ void TestWrongPairingCodeFailsBothSides() {
                  0);
 }
 
+void TestSameConsoleIdFailsBothSidesQuickly() {
+  // e.g. the 3dslibris folder (with console_id.txt) copied between consoles.
+  sync_manifest::Manifest m;
+  PipeTransport ta, tb;
+  ta.Connect(&tb);
+  tb.Connect(&ta);
+  SyncSession a("1234", 0x77, "A", m, &ta);
+  SyncSession b("1234", 0x77, "B", m, &tb);
+  for (uint64_t now = 1; now < 6; now++) {
+    a.Poll(now);
+    b.Poll(now);
+  }
+  test::ExpectTrue("a failed", a.phase() == SyncSession::kFailed);
+  test::ExpectTrue("b failed (not left waiting)",
+                   b.phase() == SyncSession::kFailed);
+  test::ExpectTrue("same explanation on both sides", a.error() == b.error());
+  test::ExpectTrue("explains the copied folder",
+                   a.error().find("same 3dslibris ID") != std::string::npos);
+}
+
+void TestVersionMismatchExplained() {
+  sync_manifest::Manifest m;
+  PipeTransport ta, tb;
+  ta.Connect(&tb);
+  tb.Connect(&ta);
+  SyncSession a("1234", 0xA, "A", m, &ta);
+  // A hand-made HELLO from a future protocol version.
+  sync_protocol::Hello future;
+  future.protocol_version = sync_protocol::kProtocolVersion + 1;
+  future.pairing_code = "1234";
+  future.console_id = 0xB;
+  tb.Send(sync_protocol::EncodeFrame(sync_protocol::kHello,
+                                     sync_protocol::EncodeHello(future)));
+  tb.Poll(0);
+  a.Poll(1);
+  test::ExpectTrue("a failed", a.phase() == SyncSession::kFailed);
+  test::ExpectTrue("version message",
+                   a.error().find("different 3dslibris versions") !=
+                       std::string::npos);
+  std::vector<sync_protocol::Frame> frames;
+  sync_protocol::FrameDecoder dec;
+  const std::string sent = tb.TakeReceived();
+  dec.Feed(sent.data(), sent.size(), &frames);
+  bool abort_seen = false;
+  for (size_t i = 0; i < frames.size(); i++)
+    abort_seen = abort_seen || frames[i].type == sync_protocol::kAbort;
+  test::ExpectTrue("other side was told", abort_seen);
+}
+
 void TestDisconnectFails() {
   sync_manifest::Manifest m;
   PipeTransport ta, tb;
@@ -167,6 +217,8 @@ void TestCancel() {
 int main() {
   TestBothSidesMergeSharedBooks();
   TestWrongPairingCodeFailsBothSides();
+  TestSameConsoleIdFailsBothSidesQuickly();
+  TestVersionMismatchExplained();
   TestDisconnectFails();
   TestTimeout();
   TestCancel();

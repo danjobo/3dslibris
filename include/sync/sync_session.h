@@ -62,6 +62,9 @@ public:
 
 private:
   void Fail(const std::string &message);
+  // Fails and tells the other console why (ABORT with a reason code), so
+  // both sides stop at once with the same explanation.
+  void FailAndTell(const char *reason);
   void HandleFrame(const sync_protocol::Frame &frame);
   void MergeRemote();
 

@@ -1,10 +1,13 @@
 /*
     3dslibris - console_id.h
 
-    A random identifier for this console, created on first use and kept in
-    paths::GetSdmcBase()/console_id.txt. Record ids (highlights, bookmarks)
-    carry its 32-bit prefix so records created on different consoles never
-    collide when synced.
+    An identifier for this console. On the 3DS it is derived from the
+    system's per-console hash (CFGU_GenHashConsoleUnique), so it stays
+    unique even if the 3dslibris folder is copied between consoles; if that
+    is unavailable (and on hosts) a random id kept in
+    paths::GetSdmcBase()/console_id.txt is used. Record ids (highlights,
+    bookmarks) carry its 32-bit prefix so records created on different
+    consoles never collide when synced.
 */
 
 #pragma once

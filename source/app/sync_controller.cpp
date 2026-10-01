@@ -113,6 +113,7 @@ void SyncController::EndSession() {
 }
 
 void SyncController::ShowError(const std::string &message) {
+  app_.PrintStatus("SYNC failed: " + message);
   EndSession();
   StopNetwork();
   message_ = message;
@@ -224,6 +225,12 @@ void SyncController::ApplyResults() {
   }
 
   char line[96];
+  snprintf(line, sizeof(line),
+           "SYNC done with %s: matched=%d changed=%d added=%d updated=%d "
+           "positions=%d",
+           session_->peer_name().c_str(), session_->matched_books(),
+           (int)results.size(), highlights_added, records_updated, positions);
+  app_.PrintStatus(line);
   summary_lines_.clear();
   summary_lines_.push_back("Synced with " + session_->peer_name());
   snprintf(line, sizeof(line), "%d book%s on both consoles",
@@ -376,6 +383,7 @@ void SyncController::Draw() {
     lines.push_back("Both consoles: same Wi-Fi, this screen open.");
     break;
   case kHosting:
+    lines.push_back("This 3DS: " + DeviceName());
     lines.push_back("Pairing code:");
     lines.push_back("");
     lines.push_back("        " + pairing_code_);
@@ -386,6 +394,7 @@ void SyncController::Draw() {
     lines.push_back("Waiting...   B: cancel");
     break;
   case kJoining:
+    lines.push_back("This 3DS: " + DeviceName());
     lines.push_back("Looking for the host on this Wi-Fi");
     lines.push_back("network...");
     lines.push_back("");

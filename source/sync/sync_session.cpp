@@ -1,5 +1,31 @@
 #include "sync/sync_session.h"
 
+namespace {
+
+// ABORT reason codes (sent between consoles) and what they mean.
+static const char *kReasonPairing = "pairing code";
+static const char *kReasonVersion = "version";
+static const char *kReasonSameConsole = "same console";
+static const char *kReasonDamaged = "damaged";
+static const char *kReasonCancelled = "cancelled";
+
+std::string ReasonMessage(const std::string &reason) {
+  if (reason == kReasonPairing)
+    return "Wrong pairing code";
+  if (reason == kReasonVersion)
+    return "The two consoles run different 3dslibris versions";
+  if (reason == kReasonSameConsole)
+    return "Both consoles report the same 3dslibris ID (was the 3dslibris "
+           "folder copied between them?). Update both to this version";
+  if (reason == kReasonDamaged)
+    return "Data was damaged on the way. Try again";
+  if (reason == kReasonCancelled)
+    return "The other 3DS cancelled";
+  return "The other 3DS stopped the sync (" + reason + ")";
+}
+
+} // namespace
+
 SyncSession::SyncSession(const std::string &pairing_code, uint64_t console_id,
                          const std::string &name,
                          const sync_manifest::Manifest &local,
@@ -17,16 +43,19 @@ void SyncSession::Fail(const std::string &message) {
   phase_ = kFailed;
 }
 
-void SyncSession::Cancel() {
-  if (phase_ == kDone || phase_ == kFailed)
+void SyncSession::FailAndTell(const char *reason) {
+  if (phase_ == kFailed || phase_ == kDone)
     return;
   if (transport_ && transport_->GetState() == SyncTransport::kConnected) {
-    transport_->Send(
-        sync_protocol::EncodeFrame(sync_protocol::kAbort, "cancelled"));
+    // Anything already queued (e.g. our HELLO) goes first, then the reason.
+    transport_->Send(sync_protocol::EncodeFrame(sync_protocol::kAbort, reason));
     transport_->Poll(0);
   }
-  Fail("Cancelled");
+  Fail(std::string(reason) == kReasonCancelled ? std::string("Cancelled")
+                                               : ReasonMessage(reason));
 }
+
+void SyncSession::Cancel() { FailAndTell(kReasonCancelled); }
 
 void SyncSession::Poll(uint64_t now_ms) {
   if (!transport_ || phase_ == kDone || phase_ == kFailed)
@@ -67,7 +96,7 @@ void SyncSession::Poll(uint64_t now_ms) {
     std::vector<sync_protocol::Frame> frames;
     if (decoder_.Feed(bytes.data(), bytes.size(), &frames) !=
         sync_protocol::FrameDecoder::kOk) {
-      Fail("The other 3DS sent damaged data");
+      FailAndTell(kReasonDamaged);
       return;
     }
     for (size_t i = 0; i < frames.size() && phase_ != kFailed; i++)
@@ -102,22 +131,19 @@ void SyncSession::HandleFrame(const sync_protocol::Frame &frame) {
   case sync_protocol::kHello: {
     sync_protocol::Hello hello;
     if (!sync_protocol::DecodeHello(frame.payload, &hello)) {
-      Fail("The other 3DS sent damaged data");
+      FailAndTell(kReasonDamaged);
       return;
     }
     if (hello.protocol_version != sync_protocol::kProtocolVersion) {
-      Fail("The other 3DS runs a different 3dslibris version");
+      FailAndTell(kReasonVersion);
       return;
     }
     if (hello.pairing_code != pairing_code_) {
-      transport_->Send(
-          sync_protocol::EncodeFrame(sync_protocol::kAbort, "pairing code"));
-      transport_->Poll(0); // let the other console know why
-      Fail("Wrong pairing code");
+      FailAndTell(kReasonPairing);
       return;
     }
     if (hello.console_id == console_id_) {
-      Fail("Can't sync a 3DS with itself");
+      FailAndTell(kReasonSameConsole);
       return;
     }
     peer_name_ = hello.name;
@@ -128,11 +154,11 @@ void SyncSession::HandleFrame(const sync_protocol::Frame &frame) {
   }
   case sync_protocol::kManifest:
     if (!hello_ok_) {
-      Fail("The other 3DS skipped pairing");
+      FailAndTell(kReasonPairing);
       return;
     }
     if (!sync_manifest::Parse(frame.payload, &remote_)) {
-      Fail("The other 3DS sent damaged data");
+      FailAndTell(kReasonDamaged);
       return;
     }
     manifest_received_ = true;
@@ -142,8 +168,7 @@ void SyncSession::HandleFrame(const sync_protocol::Frame &frame) {
     done_received_ = true;
     return;
   case sync_protocol::kAbort:
-    Fail(frame.payload == "pairing code" ? "Wrong pairing code"
-                                         : "The other 3DS cancelled");
+    Fail(ReasonMessage(frame.payload));
     return;
   default:
     // Book transfer messages and future types: ignored by this phase.

@@ -76,10 +76,29 @@ bool Parse(const std::string &text, uint64_t *out) {
   return true;
 }
 
+#ifdef __3DS__
+// The system's per-console hash: unique even when the 3dslibris folder (and
+// its console_id.txt) is copied from one console's SD card to another's.
+uint64_t HardwareId() {
+  uint64_t hash = 0;
+  if (R_FAILED(cfguInit()))
+    return 0;
+  const Result rc = CFGU_GenHashConsoleUnique(0x3D5B1u, &hash);
+  cfguExit();
+  return R_SUCCEEDED(rc) && hash ? Generate(hash) : 0;
+}
+#endif
+
 uint64_t Get() {
   static uint64_t cached = 0;
   if (cached)
     return cached;
+
+#ifdef __3DS__
+  cached = HardwareId();
+  if (cached)
+    return cached;
+#endif
 
   const std::string path = FilePath();
   FILE *fp = fopen(path.c_str(), "rb");

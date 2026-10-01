@@ -209,7 +209,9 @@ ifeq ($(PAGE_TIMING),1)
 CFLAGS	+=	-DPAGE_TIMING=1
 endif
 
-CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -std=gnu++11 -fstack-usage
+# -Wno-psabi: silences GCC's "parameter passing changed in GCC 7.1" notes,
+# which only matter when linking against code built with GCC < 7.1.
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -std=gnu++11 -fstack-usage -Wno-psabi
 
 
 ASFLAGS	:=	-g $(ARCH)
