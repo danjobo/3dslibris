@@ -207,6 +207,8 @@ void ReaderController::MarkProgressDirty(Book *book)
     last_progress_persist_ms_ = osGetTime();
   }
   progress_autosave_dirty_ = true;
+  // Page turns are reading activity: "most recently read" wins when synced.
+  book->NoteReadingActivity((uint32_t)time(NULL));
 }
 
 void ReaderController::TryPersistProgress(Book *book, bool force)
@@ -232,6 +234,7 @@ void ReaderController::TryPersistProgress(Book *book, bool force)
   }
 
   app_.PersistPrefs();
+  book->SaveReadingProgress();
   progress_autosave_dirty_ = false;
   last_progress_persist_ms_ = now_ms;
 }
@@ -272,6 +275,8 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
       book, layout_reflow::RemapBookmarksApprox(
                 app_.MutableDeferredRelayoutOldBookmarks(),
                 app_.GetDeferredRelayoutOldPageCount(), page_count));
+  // The approximate remap is only a fallback; text anchors are exact.
+  book->ApplyAnchoredStateAfterLayout();
   ClearDeferredRelayoutState();
   return true;
 }
@@ -430,6 +435,10 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   {
     ClearDeferredRelayoutState();
   }
+  // Re-find bookmarks and the saved position by their text; when that
+  // works the approximate deferred remap must not override it.
+  if (bookcurrent_->ApplyAnchoredStateAfterLayout())
+    ClearDeferredRelayoutState();
   if (bookcurrent_->HasPendingEpubPageCacheSave() ||
       bookcurrent_->HasPendingMobiPageCacheSave())
   {
@@ -554,6 +563,7 @@ void ReaderController::ToggleBookmark()
     auto it = std::lower_bound(bookmarks.begin(), bookmarks.end(), pagecurrent);
     bookmarks.insert(it, pagecurrent);
   }
+  bookcurrent_->OnBookmarkToggled(pagecurrent, !found);
 
   MarkProgressDirty(bookcurrent_);
   TryPersistProgress(bookcurrent_, false);

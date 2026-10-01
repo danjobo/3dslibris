@@ -317,6 +317,8 @@ void AppendHighlightEntries(Book *book, Text *text,
   const std::vector<Annotation> &annotations = book->GetAnnotations();
   for (size_t i = 0; i < annotations.size(); i++) {
     const Annotation &a = annotations[i];
+    if (!a.IsLiveHighlight())
+      continue;
     const int resolved = book->GetAnnotationPage(a.id);
     int page = resolved >= 0 ? resolved : (int)a.page_hint;
     if (page_count > 0 && page >= (int)page_count)

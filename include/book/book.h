@@ -473,29 +473,48 @@ public:
   void RequestAbortOpen();
   void ClearOpenAbortRequest();
 
-  // Highlights and notes (book_annotations.cpp). Reflowable books only;
-  // annotations are loaded lazily from paths::GetAnnotationsDir() and saved
-  // after every change. Main thread only.
+  // Per-book state (book_annotations.cpp): highlights with notes, anchored
+  // bookmarks and the reading position. Loaded lazily from
+  // paths::GetAnnotationsDir(), saved after every change. Highlights need
+  // text and are reflowable-only; bookmarks and progress work for every
+  // book (fixed-layout records use page numbers). Main thread only.
   struct HighlightRange {
     int buf_begin;
     int buf_end;
-    uint32_t annotation_id;
+    uint64_t annotation_id;
   };
   bool SupportsAnnotations() const;
+  //! All records, including bookmarks and deleted ones (tombstones); use
+  //! Annotation::IsLiveHighlight() to pick visible highlights.
   const std::vector<Annotation> &GetAnnotations();
-  const Annotation *FindAnnotation(uint32_t id);
-  //! Returns the new annotation id, or 0 if the range has no visible text.
-  uint32_t AddAnnotationFromPageRange(int page_index, int buf_begin,
+  //! A live highlight by id, or null.
+  const Annotation *FindAnnotation(uint64_t id);
+  //! Returns the new highlight id, or 0 if the range has no visible text.
+  uint64_t AddAnnotationFromPageRange(int page_index, int buf_begin,
                                       int buf_end, const std::string &note);
-  bool SetAnnotationNote(uint32_t id, const std::string &note);
-  bool RemoveAnnotation(uint32_t id);
-  //! Page where the annotation currently starts, or -1 if it can't be found.
-  int GetAnnotationPage(uint32_t id);
+  bool SetAnnotationNote(uint64_t id, const std::string &note);
+  //! Leaves a tombstone so the deletion syncs.
+  bool RemoveAnnotation(uint64_t id);
+  //! Page where the highlight currently starts, or -1 if it can't be found.
+  int GetAnnotationPage(uint64_t id);
   void CollectHighlightRanges(const Page *page,
                               std::vector<HighlightRange> *out);
-  //! Id of the annotation covering buf_index on the page, or 0.
-  uint32_t FindAnnotationAt(int page_index, int buf_index);
+  //! Id of the highlight covering buf_index on the page, or 0.
+  uint64_t FindAnnotationAt(int page_index, int buf_index);
   int GetPageIndex(const Page *page);
+
+  //! Records a bookmark added to or removed from a page (call after the
+  //! page list in GetBookmarks() has been updated).
+  void OnBookmarkToggled(int page_index, bool added);
+  //! The reader turned a page now; feeds "most recently read" for sync.
+  void NoteReadingActivity(uint32_t now);
+  //! Saves the current position as a text anchor (with the last reading
+  //! time) when it changed since the last save.
+  void SaveReadingProgress();
+  //! After the book is (re)paginated: re-find bookmarks and the saved
+  //! position by their text, migrating page-number bookmarks on first use.
+  //! Returns true when the position was moved.
+  bool ApplyAnchoredStateAfterLayout();
 
   // Reader selection mode: record word boxes during Page::Draw.
   void SetWordCaptureEnabled(bool enabled) { word_capture_enabled_ = enabled; }
@@ -503,7 +522,7 @@ public:
 
 private:
   struct AnnotationSpans {
-    uint32_t id;
+    uint64_t id;
     std::vector<annotation_text_utils::ResolvedSpan> spans;
   };
   void EnsureAnnotationsLoaded();
@@ -514,9 +533,17 @@ private:
   // bookmarks & notes list needs every highlight's page.
   void EnsureAnnotationSpans(bool allow_full_scan);
   std::string AnnotationFilePath();
+  // Anchor text for the start of a page (empty when it has no text).
+  void BuildPageStartAnchor(int page_index, std::string *quote,
+                            std::string *prefix);
+  int ResolvePageStartAnchor(const std::string &quote,
+                             const std::string &prefix, int page_hint,
+                             int page_count_hint);
 
-  std::vector<Annotation> annotations_;
+  BookState state_;
   bool annotations_loaded_ = false;
+  uint32_t pending_last_read_ = 0;
+  int progress_saved_position_ = -1;
   std::vector<AnnotationSpans> annotation_spans_;
   bool annotation_spans_valid_ = false;
   unsigned int annotation_spans_revision_ = 0;

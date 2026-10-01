@@ -1,3 +1,4 @@
+#include "book/annotation_store_utils.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_xml.h"
@@ -19,6 +20,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace {
 
@@ -1189,6 +1192,163 @@ std::string SmallFontParagraphsHtml() {
   return html;
 }
 
+// First word of a page's visible text (the generated words are unique).
+std::string FirstWordOfPage(Book &book, int page_index) {
+  Page *page = book.GetPage(page_index);
+  if (!page)
+    return std::string();
+  annotation_text_utils::VisibleText raw, norm;
+  annotation_text_utils::ExtractVisibleText(page->GetBuffer(),
+                                            page->GetLength(), &raw);
+  annotation_text_utils::NormalizeVisibleText(raw, &norm);
+  std::string word;
+  for (size_t i = 0; i < norm.chars.size(); i++) {
+    const uint32_t c = norm.chars[i];
+    if (c == ' ') {
+      if (!word.empty())
+        break;
+      continue;
+    }
+    word.push_back((char)c);
+  }
+  return word;
+}
+
+bool PageContainsWord(Book &book, int page_index, const std::string &word) {
+  Page *page = book.GetPage(page_index);
+  if (!page)
+    return false;
+  annotation_text_utils::VisibleText raw;
+  annotation_text_utils::ExtractVisibleText(page->GetBuffer(),
+                                            page->GetLength(), &raw);
+  const std::string text =
+      annotation_text_utils::CodepointsToUtf8(raw.chars, 0, raw.chars.size());
+  return text.find(word) != std::string::npos;
+}
+
+void ParseBookAt(TestCtx &tc, Book &book, int px, const std::string &html) {
+  tc.text.SetPixelSize((u8)px);
+  tc.text.display.width = 240;
+  parsedata_t p = MakeParseData(tc, book);
+  p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+  const xml_parse_utils::XmlParseResult r =
+      xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("anchored-state: parse ok", r.ok);
+}
+
+// The per-book state file lives under a relative "sdmc:" path on the host;
+// run these tests inside a scratch directory.
+struct ScratchDir {
+  char saved[1024];
+  ScratchDir() {
+    if (!getcwd(saved, sizeof(saved)))
+      saved[0] = '\0';
+    const char *tmp = getenv("TMPDIR");
+    std::string dir = std::string(tmp && *tmp ? tmp : "/tmp") +
+                      "/3dslibris-anchor-test";
+    mkdir(dir.c_str(), 0777);
+    if (chdir(dir.c_str()) != 0)
+      Fail("anchored-state", "chdir failed");
+    mkdir("sdmc:", 0777);
+    mkdir("sdmc:/3ds", 0777);
+    mkdir("sdmc:/3ds/3dslibris", 0777);
+    mkdir("sdmc:/3ds/3dslibris/annotations", 0777);
+  }
+  ~ScratchDir() {
+    if (saved[0] && chdir(saved) != 0) {
+    }
+  }
+};
+
+void RemoveStateFile(const char *folder, const char *file) {
+  const std::string path =
+      std::string("sdmc:/3ds/3dslibris/annotations/") +
+      annotation_store_utils::BuildFileName(folder, file);
+  remove(path.c_str());
+  remove((path + ".tmp").c_str());
+}
+
+void TestProgressAndBookmarksFollowTextAcrossLayouts() {
+  ScratchDir scratch;
+  RemoveStateFile("anchor", "anchor-test.html");
+  const std::string html = SmallFontParagraphsHtml();
+  unsigned char orientation = 0;
+
+  int old_position = 0, old_bookmark = 0;
+  std::string position_word, bookmark_word;
+  {
+    TestCtx tc;
+    tc.ctx.orientation = &orientation;
+    Book book(tc.ctx);
+    book.SetFolderName("anchor");
+    book.SetFileName("anchor-test.html");
+    ParseBookAt(tc, book, 14, html);
+    ExpectTrue("anchored-state: several pages", book.GetPageCount() > 6);
+    old_position = (int)book.GetPageCount() / 2;
+    old_bookmark = (int)book.GetPageCount() - 2;
+    position_word = FirstWordOfPage(book, old_position);
+    bookmark_word = FirstWordOfPage(book, old_bookmark);
+
+    book.SetPosition(old_position);
+    book.NoteReadingActivity(1700000000u);
+    book.SaveReadingProgress();
+    book.GetBookmarks().push_back((u16)old_bookmark);
+    book.OnBookmarkToggled(old_bookmark, true);
+  }
+
+  TestCtx tc;
+  tc.ctx.orientation = &orientation;
+  Book book(tc.ctx);
+  book.SetFolderName("anchor");
+  book.SetFileName("anchor-test.html");
+  ParseBookAt(tc, book, 20, html);
+  book.SetPosition(0);
+  ExpectTrue("anchored-state: position moved",
+             book.ApplyAnchoredStateAfterLayout());
+  ExpectTrue("anchored-state: position follows its text",
+             PageContainsWord(book, book.GetPosition(), position_word));
+  ExpectIntEq("anchored-state: one bookmark",
+              (int)book.GetBookmarks().size(), 1);
+  ExpectTrue("anchored-state: bookmark follows its text",
+             PageContainsWord(book, (int)book.GetBookmarks().front(),
+                              bookmark_word));
+
+  // Removing the bookmark leaves a tombstone, so it stays removed.
+  const int bookmark_page = (int)book.GetBookmarks().front();
+  book.GetBookmarks().clear();
+  book.OnBookmarkToggled(bookmark_page, false);
+  book.ApplyAnchoredStateAfterLayout();
+  ExpectIntEq("anchored-state: removed bookmark stays removed",
+              (int)book.GetBookmarks().size(), 0);
+  RemoveStateFile("anchor", "anchor-test.html");
+}
+
+void TestPageNumberBookmarksMigrateToAnchors() {
+  ScratchDir scratch;
+  RemoveStateFile("migrate", "migrate-test.html");
+  const std::string html = SmallFontParagraphsHtml();
+  unsigned char orientation = 0;
+  TestCtx tc;
+  tc.ctx.orientation = &orientation;
+  Book book(tc.ctx);
+  book.SetFolderName("migrate");
+  book.SetFileName("migrate-test.html");
+  ParseBookAt(tc, book, 14, html);
+  // As restored from 3dslibris.xml before this version.
+  book.GetBookmarks().push_back(3);
+  const std::string word = FirstWordOfPage(book, 3);
+  book.ApplyAnchoredStateAfterLayout();
+  ExpectIntEq("migrate: bookmark kept", (int)book.GetBookmarks().size(), 1);
+  ExpectIntEq("migrate: same page", (int)book.GetBookmarks().front(), 3);
+  bool has_record = false;
+  const std::vector<Annotation> &records = book.GetAnnotations();
+  for (size_t i = 0; i < records.size(); i++)
+    if (records[i].IsLiveBookmark() && records[i].quote.find(word) == 0)
+      has_record = true;
+  ExpectTrue("migrate: anchored record created", has_record);
+}
+
 void TestSmallFontParagraphsRenderWithoutDroppedLines() {
   const char *kCss = ".tx { font-size: small; text-indent: 1em; }";
   const int kSizes[] = {12, 14, 16, 20};
@@ -1249,6 +1409,8 @@ int main() {
   TestPageBreakBeforeAlwaysUsesHardBreak();
   TestLargeFontPaginationDoesNotDropTextAcrossPages();
   TestSmallFontParagraphsRenderWithoutDroppedLines();
+  TestProgressAndBookmarksFollowTextAcrossLayouts();
+  TestPageNumberBookmarksMigrateToAnchors();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

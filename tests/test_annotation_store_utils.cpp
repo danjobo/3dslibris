@@ -9,17 +9,26 @@
 
 namespace {
 
-Annotation Make(uint32_t id, const char *quote, const char *prefix,
-                const char *note) {
+const uint32_t kConsoleA = 0x1234ABCDu;
+const uint32_t kConsoleB = 0x0BADF00Du;
+
+Annotation MakeHighlight(uint64_t id, const char *quote, const char *prefix,
+                         const char *note) {
   Annotation a;
   a.id = id;
-  a.created = 1700000000u + id;
-  a.page_hint = (uint16_t)(id * 10);
+  a.kind = Annotation::kHighlight;
+  a.created = 1700000000u + (uint32_t)(id & 0xFF);
+  a.modified = a.created + 5;
+  a.page_hint = (uint16_t)((id & 0xFF) * 10);
   a.page_count_hint = 500;
   a.quote = quote;
   a.prefix = prefix;
   a.note = note;
   return a;
+}
+
+uint64_t IdOf(uint32_t console, uint32_t counter) {
+  return ((uint64_t)console << 32) | counter;
 }
 
 std::string TempPath(const char *name) {
@@ -41,45 +50,102 @@ void TestEscapeRoundTrip() {
 }
 
 void TestSerializeParseRoundTrip() {
-  std::vector<Annotation> in;
-  in.push_back(Make(1, "caf\xC3\xA9 <b>&amp;</b> \"quoted\"", "before",
-                    "my note\nsecond line\twith tab"));
-  in.push_back(Make(7, "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E", "", ""));
+  BookState in;
+  in.records.push_back(MakeHighlight(IdOf(kConsoleA, 1),
+                                     "caf\xC3\xA9 \"quoted\"", "before",
+                                     "my note\nsecond line\twith tab"));
+  Annotation bookmark;
+  bookmark.id = IdOf(kConsoleB, 7);
+  bookmark.kind = Annotation::kBookmark;
+  bookmark.created = 1700000100u;
+  bookmark.modified = 1700000200u;
+  bookmark.page_hint = 12;
+  bookmark.page_count_hint = 300;
+  bookmark.quote = "Chapter Two";
+  in.records.push_back(bookmark);
+  Annotation tombstone = MakeHighlight(IdOf(kConsoleA, 2), "", "", "");
+  tombstone.deleted = true;
+  in.records.push_back(tombstone);
+  in.has_progress = true;
+  in.progress.last_read = 1700000300u;
+  in.progress.page_hint = 42;
+  in.progress.page_count_hint = 300;
+  in.progress.quote = "\xE6\x97\xA5\xE6\x9C\xAC start of page";
+  in.progress.prefix = "";
 
-  std::vector<Annotation> out;
+  BookState out;
   test::ExpectTrue("parsed",
                    annotation_store_utils::Parse(
-                       annotation_store_utils::Serialize(in), &out));
-  test::ExpectEq("count", (int)out.size(), 2);
-  test::ExpectEqU("id", out[0].id, 1);
-  test::ExpectEqU("created", out[0].created, 1700000001u);
-  test::ExpectEq("page hint", out[0].page_hint, 10);
-  test::ExpectEq("page count hint", out[0].page_count_hint, 500);
-  test::ExpectStrEq("quote", out[0].quote.c_str(), in[0].quote.c_str());
-  test::ExpectStrEq("prefix", out[0].prefix.c_str(), "before");
-  test::ExpectStrEq("note", out[0].note.c_str(), in[0].note.c_str());
-  test::ExpectStrEq("cjk quote", out[1].quote.c_str(), in[1].quote.c_str());
-  test::ExpectStrEq("empty note", out[1].note.c_str(), "");
+                       annotation_store_utils::Serialize(in), kConsoleA,
+                       &out));
+  test::ExpectEq("record count", (int)out.records.size(), 3);
+  test::ExpectTrue("highlight id",
+                   out.records[0].id == IdOf(kConsoleA, 1));
+  test::ExpectTrue("highlight kind",
+                   out.records[0].kind == Annotation::kHighlight);
+  test::ExpectEqU("modified", out.records[0].modified,
+                  in.records[0].modified);
+  test::ExpectStrEq("quote", out.records[0].quote.c_str(),
+                    in.records[0].quote.c_str());
+  test::ExpectStrEq("note", out.records[0].note.c_str(),
+                    in.records[0].note.c_str());
+  test::ExpectTrue("bookmark kind",
+                   out.records[1].kind == Annotation::kBookmark);
+  test::ExpectTrue("bookmark id from other console",
+                   out.records[1].id == IdOf(kConsoleB, 7));
+  test::ExpectEq("bookmark page", out.records[1].page_hint, 12);
+  test::ExpectTrue("tombstone kept", out.records[2].deleted);
+  test::ExpectTrue("progress present", out.has_progress);
+  test::ExpectEqU("progress last read", out.progress.last_read, 1700000300u);
+  test::ExpectEq("progress page", out.progress.page_hint, 42);
+  test::ExpectStrEq("progress quote", out.progress.quote.c_str(),
+                    in.progress.quote.c_str());
 }
 
-void TestParseRejectsAndSkips() {
-  std::vector<Annotation> out;
-  test::ExpectFalse("wrong header",
-                    annotation_store_utils::Parse("hello\n", &out));
-  test::ExpectFalse("empty data", annotation_store_utils::Parse("", &out));
-
+void TestParseV1MigratesIds() {
   const std::string data =
       "3DSLIBRIS-ANNOTATIONS 1\r\n"
-      "1\t0\t3\t10\tgood one\t\t\r\n"
+      "1\t1700000000\t3\t10\tgood one\t\tnote\r\n"
       "not\ta\tvalid\tline\n"
       "0\t0\t3\t10\tzero id\t\t\n"
       "2\t0\t99999\t10\tpage overflow\t\t\n"
       "3\t0\t3\t10\t\t\tempty quote\n"
-      "4\t0\t4\t10\tlast one\tpre\tnote";
-  test::ExpectTrue("parsed", annotation_store_utils::Parse(data, &out));
-  test::ExpectEq("kept valid lines", (int)out.size(), 2);
-  test::ExpectStrEq("crlf stripped", out[0].quote.c_str(), "good one");
-  test::ExpectStrEq("no trailing newline", out[1].note.c_str(), "note");
+      "4\t1700000009\t4\t10\tlast one\tpre\tnote";
+  BookState out;
+  test::ExpectTrue("v1 parsed",
+                   annotation_store_utils::Parse(data, kConsoleA, &out));
+  test::ExpectEq("kept valid lines", (int)out.records.size(), 2);
+  test::ExpectTrue("v1 id moved into console space",
+                   out.records[0].id == IdOf(kConsoleA, 1));
+  test::ExpectTrue("v1 is highlight",
+                   out.records[0].kind == Annotation::kHighlight);
+  test::ExpectEqU("v1 modified = created", out.records[1].modified,
+                  1700000009u);
+  test::ExpectFalse("v1 has no progress", out.has_progress);
+  test::ExpectStrEq("crlf stripped", out.records[0].note.c_str(), "note");
+}
+
+void TestParseRejects() {
+  BookState out;
+  test::ExpectFalse("wrong header",
+                    annotation_store_utils::Parse("hello\n", kConsoleA, &out));
+  test::ExpectFalse("empty data",
+                    annotation_store_utils::Parse("", kConsoleA, &out));
+  const std::string data =
+      "3DSLIBRIS-BOOKSTATE 2\n"
+      "H\tzz\t1\t1\t0\t1\t1\tbad id\t\t\n"
+      "H\t0000000000000000\t1\t1\t0\t1\t1\tzero id\t\t\n"
+      "H\t0000000100000001\t1\t1\t0\t1\t1\t\t\t\n"
+      "X\t0000000100000002\t1\t1\t0\t1\t1\tunknown kind\t\t\n"
+      "P\tbad\t1\t1\tq\tp\n"
+      "B\t0000000100000003\t1\t1\t0\t5\t9\t\t\t\n";
+  test::ExpectTrue("v2 parsed",
+                   annotation_store_utils::Parse(data, kConsoleA, &out));
+  test::ExpectEq("only the textless bookmark survives",
+                 (int)out.records.size(), 1);
+  test::ExpectTrue("fixed-layout bookmark without text",
+                   out.records[0].kind == Annotation::kBookmark);
+  test::ExpectFalse("bad progress ignored", out.has_progress);
 }
 
 void TestBuildFileName() {
@@ -107,28 +173,32 @@ void TestFileRoundTrip() {
   remove(path.c_str());
   remove((path + ".tmp").c_str());
 
-  std::vector<Annotation> out;
-  out.push_back(Make(9, "stale", "", ""));
+  BookState out;
+  out.records.push_back(MakeHighlight(IdOf(kConsoleA, 9), "stale", "", ""));
   test::ExpectTrue("missing file is empty",
-                   annotation_store_utils::LoadFile(path, &out));
-  test::ExpectTrue("missing file clears list", out.empty());
+                   annotation_store_utils::LoadFile(path, kConsoleA, &out));
+  test::ExpectTrue("missing file clears state", out.Empty());
 
-  std::vector<Annotation> in;
-  in.push_back(Make(3, "saved quote", "p", "n"));
+  BookState in;
+  in.records.push_back(MakeHighlight(IdOf(kConsoleA, 3), "saved quote", "p",
+                                     "n"));
   test::ExpectTrue("saved", annotation_store_utils::SaveFile(path, in));
   test::ExpectTrue("saved again", annotation_store_utils::SaveFile(path, in));
-  test::ExpectTrue("loaded", annotation_store_utils::LoadFile(path, &out));
-  test::ExpectEq("loaded count", (int)out.size(), 1);
-  test::ExpectStrEq("loaded quote", out[0].quote.c_str(), "saved quote");
+  test::ExpectTrue("loaded",
+                   annotation_store_utils::LoadFile(path, kConsoleA, &out));
+  test::ExpectEq("loaded count", (int)out.records.size(), 1);
+  test::ExpectStrEq("loaded quote", out.records[0].quote.c_str(),
+                    "saved quote");
 
   // Simulate a crash after the old file was removed but before the rename.
   test::ExpectEq("rename to tmp",
                  rename(path.c_str(), (path + ".tmp").c_str()), 0);
-  test::ExpectTrue("tmp fallback", annotation_store_utils::LoadFile(path, &out));
-  test::ExpectEq("tmp fallback count", (int)out.size(), 1);
+  test::ExpectTrue("tmp fallback",
+                   annotation_store_utils::LoadFile(path, kConsoleA, &out));
+  test::ExpectEq("tmp fallback count", (int)out.records.size(), 1);
 
-  test::ExpectTrue("empty save", annotation_store_utils::SaveFile(
-                                     path, std::vector<Annotation>()));
+  test::ExpectTrue("empty save",
+                   annotation_store_utils::SaveFile(path, BookState()));
   FILE *fp = fopen(path.c_str(), "rb");
   test::ExpectTrue("empty save removes file", fp == NULL);
   if (fp)
@@ -140,11 +210,15 @@ void TestFileRoundTrip() {
 }
 
 void TestNextId() {
-  std::vector<Annotation> list;
-  test::ExpectEqU("first id", annotation_store_utils::NextId(list), 1);
-  list.push_back(Make(4, "a", "", ""));
-  list.push_back(Make(2, "b", "", ""));
-  test::ExpectEqU("after max", annotation_store_utils::NextId(list), 5);
+  BookState state;
+  test::ExpectTrue("first id",
+                   annotation_store_utils::NextId(state, kConsoleA) ==
+                       IdOf(kConsoleA, 1));
+  state.records.push_back(MakeHighlight(IdOf(kConsoleA, 4), "a", "", ""));
+  state.records.push_back(MakeHighlight(IdOf(kConsoleB, 90), "b", "", ""));
+  test::ExpectTrue("after own max, ignoring other console",
+                   annotation_store_utils::NextId(state, kConsoleA) ==
+                       IdOf(kConsoleA, 5));
 }
 
 } // namespace
@@ -152,7 +226,8 @@ void TestNextId() {
 int main() {
   TestEscapeRoundTrip();
   TestSerializeParseRoundTrip();
-  TestParseRejectsAndSkips();
+  TestParseV1MigratesIds();
+  TestParseRejects();
   TestBuildFileName();
   TestFileRoundTrip();
   TestNextId();

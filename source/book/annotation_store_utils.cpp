@@ -7,7 +7,8 @@ namespace annotation_store_utils {
 
 namespace {
 
-static const char *kHeader = "3DSLIBRIS-ANNOTATIONS 1";
+static const char *kHeaderV1 = "3DSLIBRIS-ANNOTATIONS 1";
+static const char *kHeaderV2 = "3DSLIBRIS-BOOKSTATE 2";
 static const size_t kMaxFileBytes = 4 * 1024 * 1024;
 
 void SplitTabs(const std::string &line, std::vector<std::string> *fields) {
@@ -35,9 +36,102 @@ bool ParseU32(const std::string &s, unsigned long max, unsigned long *out) {
   return true;
 }
 
+bool ParseHex64(const std::string &s, uint64_t *out) {
+  if (s.empty() || s.size() > 16)
+    return false;
+  uint64_t v = 0;
+  for (size_t i = 0; i < s.size(); i++) {
+    const char c = s[i];
+    int d;
+    if (c >= '0' && c <= '9')
+      d = c - '0';
+    else if (c >= 'a' && c <= 'f')
+      d = c - 'a' + 10;
+    else if (c >= 'A' && c <= 'F')
+      d = c - 'A' + 10;
+    else
+      return false;
+    v = (v << 4) | (uint64_t)d;
+  }
+  *out = v;
+  return true;
+}
+
 bool IsFatSafe(char c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+}
+
+void AppendUnsigned(std::string *out, unsigned long v) {
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%lu", v);
+  *out += buf;
+}
+
+// v1: id created page_hint page_count_hint quote prefix note
+bool ParseV1Line(const std::vector<std::string> &f, uint32_t console_prefix,
+                 Annotation *a) {
+  if (f.size() != 7)
+    return false;
+  unsigned long id = 0, created = 0, page = 0, count = 0;
+  if (!ParseU32(f[0], 0xFFFFFFFFUL, &id) || id == 0 ||
+      !ParseU32(f[1], 0xFFFFFFFFUL, &created) ||
+      !ParseU32(f[2], 0xFFFFUL, &page) || !ParseU32(f[3], 0xFFFFUL, &count))
+    return false;
+  a->id = ((uint64_t)console_prefix << 32) | (uint64_t)id;
+  a->kind = Annotation::kHighlight;
+  a->created = (uint32_t)created;
+  a->modified = (uint32_t)created;
+  a->deleted = false;
+  a->page_hint = (uint16_t)page;
+  a->page_count_hint = (uint16_t)count;
+  a->quote = UnescapeField(f[4]);
+  a->prefix = UnescapeField(f[5]);
+  a->note = UnescapeField(f[6]);
+  return !a->quote.empty();
+}
+
+// v2 H/B: kind id created modified deleted page_hint page_count_hint quote
+//         prefix note
+bool ParseV2Record(const std::vector<std::string> &f, Annotation *a) {
+  if (f.size() != 10 || (f[0] != "H" && f[0] != "B"))
+    return false;
+  unsigned long created = 0, modified = 0, deleted = 0, page = 0, count = 0;
+  if (!ParseHex64(f[1], &a->id) || a->id == 0 ||
+      !ParseU32(f[2], 0xFFFFFFFFUL, &created) ||
+      !ParseU32(f[3], 0xFFFFFFFFUL, &modified) ||
+      !ParseU32(f[4], 1, &deleted) || !ParseU32(f[5], 0xFFFFUL, &page) ||
+      !ParseU32(f[6], 0xFFFFUL, &count))
+    return false;
+  a->kind = f[0] == "H" ? Annotation::kHighlight : Annotation::kBookmark;
+  a->created = (uint32_t)created;
+  a->modified = (uint32_t)modified;
+  a->deleted = deleted != 0;
+  a->page_hint = (uint16_t)page;
+  a->page_count_hint = (uint16_t)count;
+  a->quote = UnescapeField(f[7]);
+  a->prefix = UnescapeField(f[8]);
+  a->note = UnescapeField(f[9]);
+  // A live highlight needs text to anchor; bookmarks in fixed-layout books
+  // and tombstones may have none.
+  return !(a->kind == Annotation::kHighlight && !a->deleted &&
+           a->quote.empty());
+}
+
+// v2 P: P last_read page_hint page_count_hint quote prefix
+bool ParseV2Progress(const std::vector<std::string> &f, ReadingProgress *p) {
+  if (f.size() != 6 || f[0] != "P")
+    return false;
+  unsigned long last_read = 0, page = 0, count = 0;
+  if (!ParseU32(f[1], 0xFFFFFFFFUL, &last_read) ||
+      !ParseU32(f[2], 0xFFFFUL, &page) || !ParseU32(f[3], 0xFFFFUL, &count))
+    return false;
+  p->last_read = (uint32_t)last_read;
+  p->page_hint = (uint16_t)page;
+  p->page_count_hint = (uint16_t)count;
+  p->quote = UnescapeField(f[4]);
+  p->prefix = UnescapeField(f[5]);
+  return true;
 }
 
 } // namespace
@@ -96,16 +190,39 @@ std::string UnescapeField(const std::string &in) {
   return out;
 }
 
-std::string Serialize(const std::vector<Annotation> &annotations) {
-  std::string out = kHeader;
+std::string Serialize(const BookState &state) {
+  std::string out = kHeaderV2;
   out.push_back('\n');
-  for (size_t i = 0; i < annotations.size(); i++) {
-    const Annotation &a = annotations[i];
-    char nums[80];
-    snprintf(nums, sizeof(nums), "%lu\t%lu\t%u\t%u\t", (unsigned long)a.id,
-             (unsigned long)a.created, (unsigned)a.page_hint,
-             (unsigned)a.page_count_hint);
-    out += nums;
+  if (state.has_progress) {
+    const ReadingProgress &p = state.progress;
+    out += "P\t";
+    AppendUnsigned(&out, p.last_read);
+    out.push_back('\t');
+    AppendUnsigned(&out, p.page_hint);
+    out.push_back('\t');
+    AppendUnsigned(&out, p.page_count_hint);
+    out.push_back('\t');
+    out += EscapeField(p.quote);
+    out.push_back('\t');
+    out += EscapeField(p.prefix);
+    out.push_back('\n');
+  }
+  for (size_t i = 0; i < state.records.size(); i++) {
+    const Annotation &a = state.records[i];
+    char head[64];
+    snprintf(head, sizeof(head), "%c\t%016llx\t", (char)a.kind,
+             (unsigned long long)a.id);
+    out += head;
+    AppendUnsigned(&out, a.created);
+    out.push_back('\t');
+    AppendUnsigned(&out, a.modified);
+    out.push_back('\t');
+    out += a.deleted ? "1" : "0";
+    out.push_back('\t');
+    AppendUnsigned(&out, a.page_hint);
+    out.push_back('\t');
+    AppendUnsigned(&out, a.page_count_hint);
+    out.push_back('\t');
     out += EscapeField(a.quote);
     out.push_back('\t');
     out += EscapeField(a.prefix);
@@ -116,12 +233,12 @@ std::string Serialize(const std::vector<Annotation> &annotations) {
   return out;
 }
 
-bool Parse(const std::string &data, std::vector<Annotation> *out) {
+bool Parse(const std::string &data, uint32_t console_prefix, BookState *out) {
   if (!out)
     return false;
-  out->clear();
+  *out = BookState();
   size_t pos = 0;
-  bool header_seen = false;
+  int version = 0;
   std::vector<std::string> fields;
   while (pos <= data.size()) {
     size_t eol = data.find('\n', pos);
@@ -132,37 +249,38 @@ bool Parse(const std::string &data, std::vector<Annotation> *out) {
     if (!line.empty() && line[line.size() - 1] == '\r')
       line.erase(line.size() - 1);
 
-    if (!header_seen) {
-      if (line != kHeader)
+    if (version == 0) {
+      if (line == kHeaderV1)
+        version = 1;
+      else if (line == kHeaderV2)
+        version = 2;
+      else
         return false;
-      header_seen = true;
       continue;
     }
     if (line.empty())
       continue;
 
     SplitTabs(line, &fields);
-    if (fields.size() != 7)
+    if (version == 1) {
+      Annotation a;
+      if (ParseV1Line(fields, console_prefix, &a))
+        out->records.push_back(a);
       continue;
-    unsigned long id = 0, created = 0, page = 0, count = 0;
-    if (!ParseU32(fields[0], 0xFFFFFFFFUL, &id) || id == 0 ||
-        !ParseU32(fields[1], 0xFFFFFFFFUL, &created) ||
-        !ParseU32(fields[2], 0xFFFFUL, &page) ||
-        !ParseU32(fields[3], 0xFFFFUL, &count))
+    }
+    if (!fields.empty() && fields[0] == "P") {
+      ReadingProgress p;
+      if (ParseV2Progress(fields, &p)) {
+        out->progress = p;
+        out->has_progress = true;
+      }
       continue;
+    }
     Annotation a;
-    a.id = (uint32_t)id;
-    a.created = (uint32_t)created;
-    a.page_hint = (uint16_t)page;
-    a.page_count_hint = (uint16_t)count;
-    a.quote = UnescapeField(fields[4]);
-    a.prefix = UnescapeField(fields[5]);
-    a.note = UnescapeField(fields[6]);
-    if (a.quote.empty())
-      continue;
-    out->push_back(a);
+    if (ParseV2Record(fields, &a))
+      out->records.push_back(a);
   }
-  return header_seen;
+  return version != 0;
 }
 
 std::string BuildFileName(const std::string &folder,
@@ -183,10 +301,11 @@ std::string BuildFileName(const std::string &folder,
   return readable + "_" + hex + ".txt";
 }
 
-bool LoadFile(const std::string &path, std::vector<Annotation> *out) {
+bool LoadFile(const std::string &path, uint32_t console_prefix,
+              BookState *out) {
   if (!out)
     return false;
-  out->clear();
+  *out = BookState();
   FILE *fp = fopen(path.c_str(), "rb");
   if (!fp) {
     // A crash between removing the old file and renaming the new one leaves
@@ -205,12 +324,11 @@ bool LoadFile(const std::string &path, std::vector<Annotation> *out) {
       break;
   }
   fclose(fp);
-  return Parse(data, out);
+  return Parse(data, console_prefix, out);
 }
 
-bool SaveFile(const std::string &path,
-              const std::vector<Annotation> &annotations) {
-  if (annotations.empty()) {
+bool SaveFile(const std::string &path, const BookState &state) {
+  if (state.Empty()) {
     remove(path.c_str());
     remove((path + ".tmp").c_str());
     return true;
@@ -219,7 +337,7 @@ bool SaveFile(const std::string &path,
   FILE *fp = fopen(tmp.c_str(), "wb");
   if (!fp)
     return false;
-  const std::string data = Serialize(annotations);
+  const std::string data = Serialize(state);
   const bool wrote = fwrite(data.data(), 1, data.size(), fp) == data.size();
   const bool closed = fclose(fp) == 0;
   if (!wrote || !closed) {
@@ -231,12 +349,17 @@ bool SaveFile(const std::string &path,
   return rename(tmp.c_str(), path.c_str()) == 0;
 }
 
-uint32_t NextId(const std::vector<Annotation> &annotations) {
-  uint32_t max_id = 0;
-  for (size_t i = 0; i < annotations.size(); i++)
-    if (annotations[i].id > max_id)
-      max_id = annotations[i].id;
-  return max_id + 1;
+uint64_t NextId(const BookState &state, uint32_t console_prefix) {
+  uint32_t max_counter = 0;
+  for (size_t i = 0; i < state.records.size(); i++) {
+    const uint64_t id = state.records[i].id;
+    if ((uint32_t)(id >> 32) != console_prefix)
+      continue;
+    const uint32_t counter = (uint32_t)(id & 0xFFFFFFFFu);
+    if (counter > max_counter)
+      max_counter = counter;
+  }
+  return ((uint64_t)console_prefix << 32) | (uint64_t)(max_counter + 1);
 }
 
 } // namespace annotation_store_utils

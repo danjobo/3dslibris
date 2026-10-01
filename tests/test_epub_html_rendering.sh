@@ -70,6 +70,7 @@ fi
   "$TEST_ROOT/source/book/inline_image_screen_layout.cpp" \
   "$TEST_ROOT/source/book/page.cpp" \
   "$TEST_ROOT/source/book/book_annotations.cpp" \
+  "$TEST_ROOT/source/shared/console_id.cpp" \
   "$TEST_ROOT/source/book/annotation_text_utils.cpp" \
   "$TEST_ROOT/source/book/annotation_store_utils.cpp" \
   "$TEST_ROOT/source/book/page_alignment_utils.cpp" \

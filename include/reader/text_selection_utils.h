@@ -46,7 +46,7 @@ struct TextSelectionState {
 
   SelectionPopup popup = SelectionPopup::None;
   int popup_index = 0;
-  uint32_t popup_annotation_id = 0;
+  uint64_t popup_annotation_id = 0;
   int popup_buf_begin = -1;
   int popup_buf_end = -1;
 

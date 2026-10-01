@@ -19,7 +19,10 @@ Result ExportBooks(const std::vector<Book *> &books) {
     if (!book || book->IsBrowserFolder() || !book->SupportsAnnotations())
       continue;
     const std::vector<Annotation> &annotations = book->GetAnnotations();
-    if (annotations.empty())
+    bool has_highlights = false;
+    for (size_t i = 0; i < annotations.size() && !has_highlights; i++)
+      has_highlights = annotations[i].IsLiveHighlight();
+    if (!has_highlights)
       continue;
 
     const char *raw_title = book->GetTitle();
@@ -30,6 +33,8 @@ Result ExportBooks(const std::vector<Book *> &books) {
 
     for (size_t i = 0; i < annotations.size(); i++) {
       const Annotation &a = annotations[i];
+      if (!a.IsLiveHighlight())
+        continue;
       readwise_csv_utils::Row row;
       row.highlight = a.quote;
       row.title = title;

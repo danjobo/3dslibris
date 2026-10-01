@@ -458,7 +458,7 @@ static bool EnterSelectionMode(App &app, Book *book, Text *ts) {
   return true;
 }
 
-static uint32_t HighlightUnderCursor(Book *book,
+static uint64_t HighlightUnderCursor(Book *book,
                                      const TextSelectionState &sel) {
   const std::vector<WordBox> *words = CurrentPageWords(book);
   if (!words || sel.cursor < 0 || sel.cursor >= (int)words->size())
@@ -473,7 +473,7 @@ static void OpenPopupForSelection(App &app, Book *book, Text *ts) {
   if (!words)
     return;
   const bool single_word = sel.anchor < 0 || sel.anchor == sel.cursor;
-  const uint32_t existing = single_word ? HighlightUnderCursor(book, sel) : 0;
+  const uint64_t existing = single_word ? HighlightUnderCursor(book, sel) : 0;
   sel.popup_index = 0;
   if (existing) {
     sel.popup = SelectionPopup::ExistingHighlight;
@@ -519,7 +519,7 @@ static void RunPopupOption(App &app, Book *book, Text *ts, int option) {
       return;
     }
   } else if (sel.popup == SelectionPopup::ExistingHighlight) {
-    const uint32_t id = sel.popup_annotation_id;
+    const uint64_t id = sel.popup_annotation_id;
     if (option == 0) {
       const Annotation *a = book->FindAnnotation(id);
       std::string note;

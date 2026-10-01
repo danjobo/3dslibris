@@ -254,6 +254,10 @@ u8 ReaderController::OpenBook()
   {
     ClearDeferredRelayoutState();
   }
+  // Re-find bookmarks and the saved position by their text; when that
+  // works the approximate deferred remap must not override it.
+  if (bookcurrent_->ApplyAnchoredStateAfterLayout())
+    ClearDeferredRelayoutState();
 
   EnsureBookMode(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
   if (app_.ShouldAbortWork())
