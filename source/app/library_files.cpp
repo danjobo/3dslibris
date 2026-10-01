@@ -48,6 +48,40 @@ std::string TitleFor(Book *book, const std::string &file_name) {
   return out;
 }
 
+void AddHighlights(Book *book, bool loaded,
+                   const sync_book_files::LocalBook &file, HighlightSet *set) {
+  if (!book->SupportsAnnotations())
+    return;
+  const std::vector<Annotation> &records = book->GetAnnotations();
+  bool any = false;
+  for (size_t i = 0; i < records.size(); i++) {
+    const Annotation &a = records[i];
+    if (!a.IsLiveHighlight())
+      continue;
+    readwise_api_utils::Highlight h;
+    h.id = a.id;
+    h.modified = a.modified;
+    h.text = a.quote;
+    h.title = TitleFor(book, file.file_name);
+    h.author = book->GetAuthor();
+    h.note = a.note;
+    // The current page when the book is open and the text is found;
+    // otherwise where the highlight was last seen.
+    const int page = loaded ? book->GetAnnotationPage(a.id) : -1;
+    h.location = (page >= 0 ? page : (int)a.page_hint) + 1;
+    h.highlighted_at = a.created;
+    h.color = a.color;
+    h.readwise_uploaded = a.readwise_uploaded;
+    h.readwise_id = a.readwise_id;
+    h.folder = file.folder;
+    h.file_name = file.file_name;
+    set->highlights.push_back(h);
+    any = true;
+  }
+  if (any)
+    set->books++;
+}
+
 } // namespace
 
 bool IsLibraryBook(const char *name) {
@@ -73,39 +107,22 @@ HighlightSet CollectHighlights(App &app) {
                                                  files[f].file_name);
     if (!book)
       continue;
-    if (book->SupportsAnnotations()) {
-      const std::vector<Annotation> &records = book->GetAnnotations();
-      bool any = false;
-      for (size_t i = 0; i < records.size(); i++) {
-        const Annotation &a = records[i];
-        if (!a.IsLiveHighlight())
-          continue;
-        readwise_api_utils::Highlight h;
-        h.id = a.id;
-        h.modified = a.modified;
-        h.text = a.quote;
-        h.title = TitleFor(book, files[f].file_name);
-        h.author = book->GetAuthor();
-        h.note = a.note;
-        // The current page when the book is open and the text is found;
-        // otherwise where the highlight was last seen.
-        const int page = loaded ? book->GetAnnotationPage(a.id) : -1;
-        h.location = (page >= 0 ? page : (int)a.page_hint) + 1;
-        h.highlighted_at = a.created;
-        h.color = a.color;
-        h.readwise_uploaded = a.readwise_uploaded;
-        h.readwise_id = a.readwise_id;
-        h.folder = files[f].folder;
-        h.file_name = files[f].file_name;
-        set.highlights.push_back(h);
-        any = true;
-      }
-      if (any)
-        set.books++;
-    }
+    AddHighlights(book, loaded != NULL, files[f], &set);
     if (!loaded)
       delete book;
   }
+  return set;
+}
+
+HighlightSet CollectBookHighlights(Book *book) {
+  HighlightSet set;
+  if (!book || book->IsBrowserFolder() || !book->GetFileName() ||
+      !book->GetFolderName())
+    return set;
+  sync_book_files::LocalBook file;
+  file.folder = book->GetFolderName();
+  file.file_name = book->GetFileName();
+  AddHighlights(book, true, file, &set);
   return set;
 }
 

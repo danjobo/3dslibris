@@ -15,6 +15,7 @@
 #include "sync/sync_book_files.h"
 
 class App;
+class Book;
 
 namespace library_files {
 
@@ -30,6 +31,8 @@ struct HighlightSet {
 };
 // Every live highlight in the library, with its book's title and author.
 HighlightSet CollectHighlights(App &app);
+// The same for one loaded book (e.g. the one being closed).
+HighlightSet CollectBookHighlights(Book *book);
 // Stores each highlight's readwise_uploaded / readwise_id in its book's
 // state (the open or listed Book, or the state file). Returns how many.
 int SaveUploadState(App &app,

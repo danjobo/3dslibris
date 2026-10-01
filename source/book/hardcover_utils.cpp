@@ -16,7 +16,8 @@ namespace hardcover_utils {
 
 namespace {
 
-const char kLinksHeader[] = "3DSLIBRIS-HARDCOVER 1";
+const char kLinksHeaderV1[] = "3DSLIBRIS-HARDCOVER 1";
+const char kLinksHeader[] = "3DSLIBRIS-HARDCOVER 2";
 
 bool ValidIsbn13(const std::string &digits) {
   if (digits.size() != 13 ||
@@ -118,10 +119,12 @@ std::string SerializeLinks(const std::vector<Link> &links) {
   out.push_back('\n');
   for (size_t i = 0; i < links.size(); i++) {
     const Link &l = links[i];
+    char changed[16];
+    snprintf(changed, sizeof(changed), "%lu", (unsigned long)l.changed_at);
     out += FieldSafe(l.sync_id) + "\t" + Int(l.book_id) + "\t" +
            Int(l.edition_id) + "\t" + Int(l.pages) + "\t" +
            Int(l.last_sent_page) + "\t" + (l.finished ? "1" : "0") + "\t" +
-           FieldSafe(l.title) + "\n";
+           changed + "\t" + FieldSafe(l.title) + "\n";
   }
   return out;
 }
@@ -134,8 +137,10 @@ std::vector<Link> ParseLinks(const std::string &data) {
   std::string header = data.substr(0, pos);
   if (!header.empty() && header[header.size() - 1] == '\r')
     header.erase(header.size() - 1);
-  if (header != kLinksHeader)
+  const bool v1 = header == kLinksHeaderV1;
+  if (!v1 && header != kLinksHeader)
     return links;
+  const size_t fields = v1 ? 7 : 8;
   pos++;
   std::vector<std::string> f;
   while (pos < data.size()) {
@@ -149,24 +154,87 @@ std::vector<Link> ParseLinks(const std::string &data) {
     SplitTabs(line, &f);
     Link l;
     int finished = 0;
-    if (f.size() != 7 || f[0].empty() || !ParseInt(f[1], &l.book_id) ||
-        l.book_id <= 0 || !ParseInt(f[2], &l.edition_id) ||
-        !ParseInt(f[3], &l.pages) || !ParseInt(f[4], &l.last_sent_page) ||
-        !ParseInt(f[5], &finished))
+    if (f.size() != fields || f[0].empty() || !ParseInt(f[1], &l.book_id) ||
+        l.book_id < 0 || (v1 && l.book_id == 0) ||
+        !ParseInt(f[2], &l.edition_id) || !ParseInt(f[3], &l.pages) ||
+        !ParseInt(f[4], &l.last_sent_page) || !ParseInt(f[5], &finished))
       continue;
+    if (!v1) {
+      char *end = NULL;
+      const unsigned long changed = strtoul(f[6].c_str(), &end, 10);
+      if (f[6].empty() || !end || *end != '\0')
+        continue;
+      l.changed_at = (uint32_t)changed;
+    }
     l.sync_id = f[0];
     l.finished = finished != 0;
-    l.title = f[6];
+    l.title = f[fields - 1];
     links.push_back(l);
   }
   return links;
 }
 
-int FindLink(const std::vector<Link> &links, const std::string &sync_id) {
+int FindEntry(const std::vector<Link> &links, const std::string &sync_id) {
   for (size_t i = 0; i < links.size(); i++)
     if (links[i].sync_id == sync_id)
       return (int)i;
   return -1;
+}
+
+int FindLink(const std::vector<Link> &links, const std::string &sync_id) {
+  const int i = FindEntry(links, sync_id);
+  return i >= 0 && links[(size_t)i].book_id > 0 ? i : -1;
+}
+
+namespace {
+
+bool SameLink(const Link &a, const Link &b) {
+  return a.book_id == b.book_id && a.edition_id == b.edition_id &&
+         a.pages == b.pages && a.title == b.title &&
+         a.last_sent_page == b.last_sent_page && a.finished == b.finished &&
+         a.changed_at == b.changed_at;
+}
+
+// The merged entry for one book; the same whichever side merges.
+Link MergeOne(const Link &a, const Link &b) {
+  if (a.changed_at != b.changed_at)
+    return a.changed_at > b.changed_at ? a : b;
+  if (a.book_id != b.book_id || a.edition_id != b.edition_id) {
+    // Linked separately at the same second: a fixed choice.
+    if (a.book_id != b.book_id)
+      return a.book_id > b.book_id ? a : b;
+    return a.edition_id > b.edition_id ? a : b;
+  }
+  Link out = a.title >= b.title ? a : b;
+  out.pages = a.pages > b.pages ? a.pages : b.pages;
+  out.last_sent_page =
+      a.last_sent_page > b.last_sent_page ? a.last_sent_page : b.last_sent_page;
+  out.finished = a.finished || b.finished;
+  return out;
+}
+
+} // namespace
+
+int MergeLinks(std::vector<Link> *local, const std::vector<Link> &remote) {
+  int changed = 0;
+  for (size_t r = 0; r < remote.size(); r++) {
+    const int i = FindEntry(*local, remote[r].sync_id);
+    if (i < 0) {
+      local->push_back(remote[r]);
+      // A remote unlink of a book never linked here changes nothing visible.
+      if (remote[r].book_id > 0)
+        changed++;
+      continue;
+    }
+    Link &mine = (*local)[(size_t)i];
+    const Link merged = MergeOne(mine, remote[r]);
+    if (!SameLink(merged, mine)) {
+      if (merged.book_id != mine.book_id || merged.edition_id != mine.edition_id)
+        changed++;
+      mine = merged;
+    }
+  }
+  return changed;
 }
 
 int ProgressPage(int position, int page_count, int hardcover_pages) {

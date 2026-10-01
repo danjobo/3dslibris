@@ -64,6 +64,15 @@ void App::ShowLibraryView()
     hardcover_controller_->ShowSendOnClose(GetCurrentBook());
     return;
   }
+  // Then its new and edited highlights to Readwise.
+  if (GetCurrentBook() &&
+      readwise_controller_->WantsUploadOnClose(GetCurrentBook()))
+  {
+    ApplyRenderOrientation(portrait_orientation);
+    nav_.mode = AppMode::Readwise;
+    readwise_controller_->ShowUploadOnClose(GetCurrentBook());
+    return;
+  }
   ApplyRenderOrientation(portrait_orientation);
   // Reset shared bottom buttons immediately; prefs view reuses/moves them.
   buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);

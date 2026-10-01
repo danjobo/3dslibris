@@ -59,6 +59,13 @@ std::string Serialize(const Manifest &manifest) {
     out += annotation_store_utils::Serialize(book.state);
     out += "ENDBOOK\n";
   }
+  if (!manifest.hardcover_links.empty()) {
+    out += "HARDCOVER\n";
+    out += manifest.hardcover_links;
+    if (out[out.size() - 1] != '\n')
+      out.push_back('\n');
+    out += "ENDHARDCOVER\n";
+  }
   return out;
 }
 
@@ -66,9 +73,11 @@ bool Parse(const std::string &data, Manifest *out) {
   if (!out)
     return false;
   out->books.clear();
+  out->hardcover_links.clear();
   size_t pos = 0;
   bool header_seen = false;
   bool in_book = false;
+  bool in_links = false;
   BookEntry current;
   std::string state_text;
   while (pos < data.size()) {
@@ -86,8 +95,17 @@ bool Parse(const std::string &data, Manifest *out) {
       header_seen = true;
       continue;
     }
+    if (in_links) {
+      if (line == "ENDHARDCOVER")
+        in_links = false;
+      else
+        out->hardcover_links += line + "\n";
+      continue;
+    }
     if (!in_book) {
-      if (line.compare(0, 5, "BOOK\t") == 0) {
+      if (line == "HARDCOVER") {
+        in_links = true;
+      } else if (line.compare(0, 5, "BOOK\t") == 0) {
         current = BookEntry();
         state_text.clear();
         in_book = ParseBookLine(line, &current);

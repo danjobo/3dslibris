@@ -210,6 +210,14 @@ void TestManifestRoundTrip() {
                    out.Find(sync_merge::MakeSyncBookId("manga.cbz", 1)) ==
                        NULL);
 
+  test::ExpectStrEq("no links", out.hardcover_links.c_str(), "");
+  m.hardcover_links = "3DSLIBRIS-HARDCOVER 2\nmanga.cbz#5\t1\t0\t9\t0\t0\t3\tT";
+  test::ExpectTrue("parsed with links",
+                   sync_manifest::Parse(sync_manifest::Serialize(m), &out));
+  test::ExpectEq("books still there", (int)out.books.size(), 2);
+  test::ExpectStrEq("links survive", out.hardcover_links.c_str(),
+                    "3DSLIBRIS-HARDCOVER 2\nmanga.cbz#5\t1\t0\t9\t0\t0\t3\tT\n");
+
   test::ExpectFalse("bad header", sync_manifest::Parse("nope\n", &out));
   test::ExpectTrue("malformed book skipped",
                    sync_manifest::Parse("3DSLIBRIS-SYNC 1\n"

@@ -9,6 +9,7 @@
 #include <3ds.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "app/app.h"
 #include "app/frame_input.h"
@@ -150,15 +151,23 @@ std::string HardcoverController::LoadToken() const {
   return hardcover_utils::CleanToken(raw);
 }
 
-std::vector<hardcover_utils::Link> HardcoverController::LoadLinks() const {
+std::string HardcoverController::LoadLinksText() {
   std::string data;
   ReadFile(LinksPath(), &data);
-  return hardcover_utils::ParseLinks(data);
+  return data;
+}
+
+bool HardcoverController::SaveLinksText(const std::string &text) {
+  return WriteFile(LinksPath(), text);
+}
+
+std::vector<hardcover_utils::Link> HardcoverController::LoadLinks() const {
+  return hardcover_utils::ParseLinks(LoadLinksText());
 }
 
 bool HardcoverController::SaveLinks(
     const std::vector<hardcover_utils::Link> &links) const {
-  return WriteFile(LinksPath(), hardcover_utils::SerializeLinks(links));
+  return SaveLinksText(hardcover_utils::SerializeLinks(links));
 }
 
 bool HardcoverController::LoadBookInfo(Book *book) {
@@ -305,7 +314,7 @@ void HardcoverController::DoFind() {
 void HardcoverController::ChooseResult(int index) {
   const hardcover_client::Candidate &c = results_[(size_t)index];
   std::vector<hardcover_utils::Link> links = LoadLinks();
-  int i = hardcover_utils::FindLink(links, sync_id_);
+  int i = hardcover_utils::FindEntry(links, sync_id_);
   if (i < 0) {
     links.push_back(hardcover_utils::Link());
     i = (int)links.size() - 1;
@@ -318,6 +327,7 @@ void HardcoverController::ChooseResult(int index) {
   link.title = c.title;
   link.last_sent_page = 0;
   link.finished = false;
+  link.changed_at = (uint32_t)time(NULL);
   screen_ = kMenu;
   index_ = kSendNow;
   results_.clear();
@@ -506,7 +516,12 @@ void HardcoverController::RunFrame(const FrameInput &input) {
       std::vector<hardcover_utils::Link> links = LoadLinks();
       const int i = hardcover_utils::FindLink(links, sync_id_);
       if (i >= 0) {
-        links.erase(links.begin() + i);
+        // Kept as an unlinked entry, so the unlink reaches synced consoles.
+        hardcover_utils::Link &link = links[(size_t)i];
+        link.book_id = link.edition_id = link.pages = 0;
+        link.last_sent_page = 0;
+        link.finished = false;
+        link.changed_at = (uint32_t)time(NULL);
         SaveLinks(links);
         SetLines(title_, "Unlinked. Hardcover keeps what was sent.");
       }

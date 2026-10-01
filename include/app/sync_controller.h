@@ -98,6 +98,7 @@ private:
   int records_added_;
   int records_updated_;
   int positions_moved_;
+  int links_changed_; // Hardcover links
 
   // Book picker.
   std::vector<const sync_manifest::BookEntry *> missing_;

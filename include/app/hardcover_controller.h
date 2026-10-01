@@ -9,7 +9,8 @@
         shows "Updating Hardcover..." and sends it (book marked Reading, or
         Read on the last page). Without Wi-Fi it is skipped quietly; a
         failure is shown once, not retried until the page changes again.
-    Links live in hardcover-links.txt and the token in hardcover-token.txt
+    Links live in hardcover-links.txt (shared by sync with another 3DS)
+    and the token in hardcover-token.txt
     (paste it there from hardcover.app > Settings > API), both in the
     3dslibris folder. Requests block for a few seconds; a message is drawn
     first and the work runs on the next frame.
@@ -39,6 +40,10 @@ public:
   // Shows "Updating Hardcover..." and sends, then opens the library.
   void ShowSendOnClose(Book *book);
   void RunFrame(const FrameInput &input);
+
+  // hardcover-links.txt as text, for sync ("" if there is none).
+  static std::string LoadLinksText();
+  static bool SaveLinksText(const std::string &text);
 
 private:
   enum Screen { kMenu, kResults, kMessage };

@@ -10,9 +10,12 @@
       <per-book state, annotation_store_utils v2 format>
       ENDBOOK
       ...
+      HARDCOVER
+      <hardcover-links.txt, see book/hardcover_utils.h>
+      ENDHARDCOVER
 
     Escaped text fields can't contain raw newlines, so ENDBOOK lines are
-    unambiguous.
+    unambiguous. Older versions skip the HARDCOVER section.
 */
 
 #pragma once
@@ -36,6 +39,8 @@ struct BookEntry {
 
 struct Manifest {
   std::vector<BookEntry> books;
+  // The links file as text (empty if none); merged by the app.
+  std::string hardcover_links;
 
   const BookEntry *Find(const std::string &sync_id) const;
 };

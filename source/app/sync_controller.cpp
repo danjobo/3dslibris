@@ -18,8 +18,10 @@
 #include "app/app.h"
 #include "app/library_files.h"
 #include "app/frame_input.h"
+#include "app/hardcover_controller.h"
 #include "book/annotation_store_utils.h"
 #include "book/book.h"
+#include "book/hardcover_utils.h"
 #include "settings/prefs.h"
 #include "shared/console_id.h"
 #include "shared/path_constants.h"
@@ -175,7 +177,7 @@ SyncController::SyncController(App &app)
     : app_(app), screen_(kMenu), menu_index_(0), dirty_(true), last_phase_(-1),
       results_applied_(false), received_saved_(false), last_draw_ms_(0),
       last_books_sent_(0), changed_books_(0), records_added_(0),
-      records_updated_(0), positions_moved_(0), pick_cursor_(0), pick_top_(0),
+      records_updated_(0), positions_moved_(0), links_changed_(0), pick_cursor_(0), pick_top_(0),
       local_wireless_(false), soc_buffer_(NULL), soc_ready_(false) {}
 
 SyncController::~SyncController() {
@@ -291,6 +293,7 @@ sync_manifest::Manifest SyncController::BuildLocalManifest() {
     library_.push_back(item);
     manifest.books.push_back(entry);
   }
+  manifest.hardcover_links = HardcoverController::LoadLinksText();
   return manifest;
 }
 
@@ -313,6 +316,7 @@ void SyncController::StartSession() {
   received_saved_ = false;
   last_books_sent_ = 0;
   changed_books_ = records_added_ = records_updated_ = positions_moved_ = 0;
+  links_changed_ = 0;
 }
 
 bool SyncController::OpenTransport(bool host) {
@@ -392,12 +396,24 @@ void SyncController::ApplyResults() {
   if (!results.empty())
     app_.PersistPrefs();
 
+  // Hardcover links, for every book (also ones not on this console yet).
+  const std::string links_text = HardcoverController::LoadLinksText();
+  std::vector<hardcover_utils::Link> links =
+      hardcover_utils::ParseLinks(links_text);
+  links_changed_ = hardcover_utils::MergeLinks(
+      &links,
+      hardcover_utils::ParseLinks(session_->remote_manifest().hardcover_links));
+  const std::string merged_links = hardcover_utils::SerializeLinks(links);
+  if (!links.empty() && merged_links != links_text)
+    HardcoverController::SaveLinksText(merged_links);
+
   char line[112];
   snprintf(line, sizeof(line),
            "SYNC merged with %s: matched=%d changed=%d added=%d updated=%d "
-           "positions=%d missing=%d",
+           "positions=%d links=%d missing=%d",
            session_->peer_name().c_str(), session_->matched_books(),
            changed_books_, records_added_, records_updated_, positions_moved_,
+           links_changed_,
            (int)session_->MissingBooks().size());
   app_.PrintStatus(line);
 }
@@ -438,6 +454,11 @@ void SyncController::BuildSummary() {
   snprintf(line, sizeof(line), "  %d reading position%s moved",
            positions_moved_, positions_moved_ == 1 ? "" : "s");
   summary_lines_.push_back(line);
+  if (links_changed_ > 0) {
+    snprintf(line, sizeof(line), "%d Hardcover link%s updated",
+             links_changed_, links_changed_ == 1 ? "" : "s");
+    summary_lines_.push_back(line);
+  }
 
   const int received = (int)session_->books_received().size();
   const std::vector<std::string> &failures = session_->book_failures();

@@ -16,6 +16,7 @@
 #include "app/https_client.h"
 #include "app/library_files.h"
 #include "app/readwise_client.h"
+#include "book/book.h"
 #include "book/readwise_api_utils.h"
 #include "book/readwise_export.h"
 #include "shared/path_constants.h"
@@ -37,6 +38,9 @@ const char kAuthUrl[] = "https://readwise.io/api/v2/auth/";
 
 std::string TokenPath() { return paths::GetSdmcBase() + "/readwise-token.txt"; }
 std::string LogPath() { return paths::GetSdmcBase() + "/readwise-uploaded.txt"; }
+std::string OnClosePath() {
+  return paths::GetSdmcBase() + "/readwise-on-close.txt";
+}
 
 bool ReadFile(const std::string &path, std::string *out) {
   out->clear();
@@ -125,6 +129,22 @@ bool AskToken(std::string *out) {
   return !out->empty();
 }
 
+// Identifies a set of highlights to send (text and edit time of each).
+std::string Signature(const readwise_api_utils::Work &work) {
+  std::string out;
+  for (size_t i = 0; i < work.create.size(); i++)
+    out += work.create[i].text + "\x01" +
+           std::to_string((long long)work.create[i].modified) + "\x02";
+  for (size_t i = 0; i < work.update.size(); i++)
+    out += work.update[i].text + "\x01" +
+           std::to_string((long long)work.update[i].modified) + "\x02";
+  return out;
+}
+
+std::string BookKey(Book *book) {
+  return std::string(book->GetFolderName()) + "/" + book->GetFileName();
+}
+
 std::string Plural(int n, const char *word) {
   char buf[64];
   snprintf(buf, sizeof(buf), "%d %s%s", n, word, n == 1 ? "" : "s");
@@ -134,7 +154,8 @@ std::string Plural(int n, const char *word) {
 } // namespace
 
 ReadwiseController::ReadwiseController(App &app)
-    : app_(app), index_(kUpload), dirty_(true), pending_(kNone) {}
+    : app_(app), index_(kUpload), dirty_(true), pending_(kNone),
+      on_close_(false), left_(false), close_book_(NULL) {}
 
 std::string ReadwiseController::LoadToken() const {
   std::string raw;
@@ -160,6 +181,8 @@ void ReadwiseController::SetLines(const std::string &a, const std::string &b,
 void ReadwiseController::Show() {
   index_ = kUpload;
   pending_ = kNone;
+  on_close_ = false;
+  close_book_ = NULL;
   if (LoadToken().empty())
     SetLines("Set your Readwise token first (see", "\"Readwise token\").");
   else
@@ -174,11 +197,139 @@ void ReadwiseController::Show() {
   app_.ts->MarkScreenDirty(app_.ts->screenright);
 }
 
-void ReadwiseController::Leave() { app_.ShowSettingsView(false); }
+void ReadwiseController::Leave() {
+  left_ = true;
+  if (on_close_) {
+    on_close_ = false;
+    close_book_ = NULL;
+    app_.ShowLibraryView();
+  } else {
+    app_.ShowSettingsView(false);
+  }
+}
+
+bool ReadwiseController::UploadOnCloseEnabled() const {
+  std::string text;
+  ReadFile(OnClosePath(), &text);
+  return readwise_api_utils::CleanToken(text) != "off";
+}
+
+void ReadwiseController::SetUploadOnClose(bool on) {
+  if (!WriteFile(OnClosePath(), on ? "on\n" : "off\n"))
+    SetLines("Couldn't save the setting (SD card?).");
+  else if (on)
+    SetLines("Leaving a book sends its new and edited",
+             "highlights (when on Wi-Fi).");
+  else
+    SetLines("Highlights are sent only when you choose",
+             "\"upload highlights\".");
+}
+
+readwise_api_utils::Work ReadwiseController::PendingWork(
+    const std::vector<readwise_api_utils::Highlight> &highlights) const {
+  // Highlights sent by versions before the upload state was kept in the
+  // book data are listed in this per-console log.
+  std::string log_text;
+  ReadFile(LogPath(), &log_text);
+  return readwise_api_utils::Classify(highlights,
+                                      readwise_api_utils::ParseLog(log_text));
+}
+
+bool ReadwiseController::WantsUploadOnClose(Book *book) {
+  if (!book || book->IsBrowserFolder() || !book->SupportsAnnotations() ||
+      !book->GetFileName() || !book->GetFolderName() ||
+      LoadToken().empty() || !UploadOnCloseEnabled())
+    return false;
+  const library_files::HighlightSet set =
+      library_files::CollectBookHighlights(book);
+  const readwise_api_utils::Work work = PendingWork(set.highlights);
+  if (work.create.empty() && work.update.empty())
+    return false;
+  // The same work as a failed try earlier: not again until it changes.
+  std::map<std::string, std::string>::const_iterator tried =
+      attempted_.find(BookKey(book));
+  return tried == attempted_.end() || tried->second != Signature(work);
+}
+
+void ReadwiseController::ShowUploadOnClose(Book *book) {
+  Show();
+  on_close_ = true;
+  close_book_ = book;
+  Start(kDoUploadOnClose, "Uploading highlights to Readwise...");
+}
 
 void ReadwiseController::Start(Pending work, const char *message) {
   pending_ = work;
   SetLines(message, "This takes a few seconds...");
+}
+
+ReadwiseController::Sent
+ReadwiseController::Send(const std::string &token,
+                         const readwise_api_utils::Work &work) {
+  Sent sent;
+  https_client::Session session;
+  if (!session.ok() || !session.HasNetwork()) {
+    sent.failure = "Not connected to Wi-Fi.";
+    return sent;
+  }
+  readwise_client::Client client(session, token);
+  std::vector<readwise_api_utils::Highlight> done;
+
+  // New highlights, in batches (their color goes in as a tag).
+  for (size_t start = 0; start < work.create.size();
+       start += readwise_api_utils::kBatchSize) {
+    const size_t end =
+        std::min(work.create.size(), start + readwise_api_utils::kBatchSize);
+    std::vector<readwise_api_utils::Highlight> batch(
+        work.create.begin() + start, work.create.begin() + end);
+    if (!client.Create(batch)) {
+      sent.failure = client.error();
+      return sent;
+    }
+    for (size_t i = 0; i < batch.size(); i++) {
+      batch[i].readwise_uploaded = batch[i].modified;
+      done.push_back(batch[i]);
+    }
+    sent.created += (int)batch.size();
+    // Kept after every batch, so a later failure doesn't resend these.
+    library_files::SaveUploadState(app_, done);
+    done.clear();
+  }
+
+  // Highlights already in Readwise whose note or color changed (or that
+  // were sent before colors were): update them by Readwise's id.
+  for (size_t i = 0; i < work.update.size(); i++) {
+    readwise_api_utils::Highlight h = work.update[i];
+    uint64_t id = h.readwise_id;
+    if (!id && !client.FindHighlightId(h, &id)) {
+      sent.failure = client.error();
+      break;
+    }
+    if (!id) {
+      // Not in Readwise after all (e.g. deleted there): create it again.
+      std::vector<readwise_api_utils::Highlight> one(1, h);
+      if (!client.Create(one)) {
+        sent.failure = client.error();
+        break;
+      }
+      sent.created++;
+    } else if ((work.update_note[i] && !client.UpdateNote(id, h.note)) ||
+               !client.SetColorTag(id, h.color)) {
+      sent.failure = client.error();
+      break;
+    }
+    h.readwise_uploaded = h.modified;
+    h.readwise_id = id;
+    done.push_back(h);
+    if (id)
+      sent.updated++;
+    if (done.size() >= 10) {
+      library_files::SaveUploadState(app_, done);
+      done.clear();
+    }
+  }
+  library_files::SaveUploadState(app_, done);
+  return sent;
 }
 
 void ReadwiseController::Upload() {
@@ -188,12 +339,7 @@ void ReadwiseController::Upload() {
     return;
   }
   const library_files::HighlightSet set = library_files::CollectHighlights(app_);
-  // Highlights sent by versions before the upload state was kept in the
-  // book data are listed in this per-console log.
-  std::string log_text;
-  ReadFile(LogPath(), &log_text);
-  const readwise_api_utils::Work work = readwise_api_utils::Classify(
-      set.highlights, readwise_api_utils::ParseLog(log_text));
+  const readwise_api_utils::Work work = PendingWork(set.highlights);
   if (work.create.empty() && work.update.empty()) {
     SetLines(set.highlights.empty()
                  ? std::string("No highlights yet.")
@@ -202,84 +348,47 @@ void ReadwiseController::Upload() {
     return;
   }
 
-  https_client::Session session;
-  if (!session.ok() || !session.HasNetwork()) {
-    SetLines("Not connected to Wi-Fi.");
-    return;
-  }
-  readwise_client::Client client(session, token);
-  std::vector<readwise_api_utils::Highlight> done;
-  int created = 0, updated = 0;
-  std::string failure;
-
-  // New highlights, in batches (their color goes in as a tag).
-  for (size_t start = 0; start < work.create.size() && failure.empty();
-       start += readwise_api_utils::kBatchSize) {
-    const size_t end =
-        std::min(work.create.size(), start + readwise_api_utils::kBatchSize);
-    std::vector<readwise_api_utils::Highlight> batch(
-        work.create.begin() + start, work.create.begin() + end);
-    if (!client.Create(batch)) {
-      failure = client.error();
-      break;
-    }
-    for (size_t i = 0; i < batch.size(); i++) {
-      batch[i].readwise_uploaded = batch[i].modified;
-      done.push_back(batch[i]);
-    }
-    created += (int)batch.size();
-    // Kept after every batch, so a later failure doesn't resend these.
-    library_files::SaveUploadState(app_, done);
-    done.clear();
-  }
-
-  // Highlights already in Readwise whose note or color changed (or that
-  // were sent before colors were): update them by Readwise's id.
-  for (size_t i = 0; i < work.update.size() && failure.empty(); i++) {
-    readwise_api_utils::Highlight h = work.update[i];
-    uint64_t id = h.readwise_id;
-    if (!id && !client.FindHighlightId(h, &id)) {
-      failure = client.error();
-      break;
-    }
-    if (!id) {
-      // Not in Readwise after all (e.g. deleted there): create it again.
-      std::vector<readwise_api_utils::Highlight> one(1, h);
-      if (!client.Create(one)) {
-        failure = client.error();
-        break;
-      }
-      created++;
-    } else if ((work.update_note[i] && !client.UpdateNote(id, h.note)) ||
-               !client.SetColorTag(id, h.color)) {
-      failure = client.error();
-      break;
-    }
-    h.readwise_uploaded = h.modified;
-    h.readwise_id = id;
-    done.push_back(h);
-    if (id)
-      updated++;
-    if (done.size() >= 10) {
-      library_files::SaveUploadState(app_, done);
-      done.clear();
-    }
-  }
-  library_files::SaveUploadState(app_, done);
-
+  const Sent sent = Send(token, work);
   char line[96];
   snprintf(line, sizeof(line), "Sent %s, updated %s.",
-           Plural(created, "new highlight").c_str(),
-           Plural(updated, "highlight").c_str());
+           Plural(sent.created, "new highlight").c_str(),
+           Plural(sent.updated, "highlight").c_str());
   app_.PrintStatus(std::string("READWISE ") + line +
-                   (failure.empty() ? "" : " " + failure));
-  if (failure.empty())
+                   (sent.failure.empty() ? "" : " " + sent.failure));
+  if (sent.failure.empty())
     SetLines(line, "Colors are added as tags. Deleting a",
              "highlight here doesn't delete it there.");
-  else if (created + updated > 0)
-    SetLines(line, failure);
+  else if (sent.created + sent.updated > 0)
+    SetLines(line, sent.failure);
   else
-    SetLines("Upload failed:", failure);
+    SetLines("Upload failed:", sent.failure);
+}
+
+void ReadwiseController::UploadOnClose() {
+  const std::string token = LoadToken();
+  const library_files::HighlightSet set =
+      library_files::CollectBookHighlights(close_book_);
+  const readwise_api_utils::Work work = PendingWork(set.highlights);
+  if (token.empty() || (work.create.empty() && work.update.empty())) {
+    Leave();
+    return;
+  }
+  const Sent sent = Send(token, work);
+  // Whatever is left (all of it without Wi-Fi) waits for a change.
+  attempted_[BookKey(close_book_)] = Signature(
+      PendingWork(library_files::CollectBookHighlights(close_book_).highlights));
+  char line[96];
+  snprintf(line, sizeof(line), "Sent %s, updated %s.",
+           Plural(sent.created, "new highlight").c_str(),
+           Plural(sent.updated, "highlight").c_str());
+  app_.PrintStatus(std::string("READWISE on close: ") + line +
+                   (sent.failure.empty() ? "" : " " + sent.failure));
+  // Leaving a book without Wi-Fi isn't worth a message.
+  if (sent.failure.empty() || sent.failure == "Not connected to Wi-Fi.") {
+    Leave();
+    return;
+  }
+  SetLines("Couldn't upload to Readwise:", sent.failure, "A: continue");
 }
 
 void ReadwiseController::ExportCsv() {
@@ -365,16 +474,24 @@ void ReadwiseController::TestConnection() {
 
 void ReadwiseController::RunFrame(const FrameInput &input) {
   if (pending_ != kNone) {
-    // The "working" message was drawn last frame; do the work now.
+    // Show the "working" message first; the (blocking) work runs once it
+    // is on screen, on the next frame.
+    if (dirty_) {
+      Draw();
+      return;
+    }
     const Pending work = pending_;
     pending_ = kNone;
+    left_ = false;
     if (work == kDoUpload)
       Upload();
+    else if (work == kDoUploadOnClose)
+      UploadOnClose();
     else if (work == kDoCheckToken)
       CheckToken();
     else if (work == kDoTest)
       TestConnection();
-    if (dirty_)
+    if (!left_ && dirty_)
       Draw();
     return;
   }
@@ -385,8 +502,17 @@ void ReadwiseController::RunFrame(const FrameInput &input) {
   if (touched)
     touch = app_.MapTouch(input);
   if ((keys & KEY_B) ||
-      (touched && app_.buttonback.EnclosesPoint(touch.px, touch.py))) {
+      (touched && app_.buttonback.EnclosesPoint(touch.px, touch.py)) ||
+      (on_close_ && (keys & KEY_A))) {
+    // After a failed upload on close, A or B goes on to the library.
     Leave();
+    return;
+  }
+  if (on_close_)
+    return;
+  if (keys & KEY_Y) {
+    Start(kDoTest, "Connecting to Readwise...");
+    Draw();
     return;
   }
   int chosen = -1;
@@ -410,12 +536,12 @@ void ReadwiseController::RunFrame(const FrameInput &input) {
     index_ = chosen;
   if (chosen == kUpload)
     Start(kDoUpload, "Uploading highlights to Readwise...");
+  else if (chosen == kOnClose)
+    SetUploadOnClose(!UploadOnCloseEnabled());
   else if (chosen == kExportCsv)
     ExportCsv();
   else if (chosen == kToken)
     EnterToken();
-  else if (chosen == kTest)
-    Start(kDoTest, "Connecting to Readwise...");
   if (dirty_)
     Draw();
 }
@@ -443,13 +569,22 @@ void ReadwiseController::Draw() {
     }
   }
 
+  if (on_close_) {
+    // Only the message: this is on the way out of a book.
+    app_.buttonback.Draw(ts->screenright, false);
+    ts->SetStyle(saved_style);
+    ts->MarkScreenDirty(ts->screenright);
+    return;
+  }
   const bool has_token = !LoadToken().empty();
-  const char *labels[kOptionCount] = {"upload highlights", "export CSV file",
-                                      "Readwise token", "test connection"};
+  const char *labels[kOptionCount] = {"upload highlights", "upload on close",
+                                      "export CSV file", "Readwise token"};
   const char *hints[kOptionCount] = {
-      "new and edited ones, on Wi-Fi >", "all books, to exports/ >",
-      has_token ? "saved; A to change >" : "not set; A to type it >",
-      "check Wi-Fi and token >"};
+      "new and edited ones, on Wi-Fi >",
+      UploadOnCloseEnabled() ? "on: leaving a book sends its own >" : "off >",
+      "all books, to exports/ >",
+      has_token ? "saved; A to change, Y to test >"
+                : "not set; A to type it, Y to test >"};
   for (int i = 0; i < kOptionCount; i++) {
     Button button(ts);
     LayoutButton(&button, i);

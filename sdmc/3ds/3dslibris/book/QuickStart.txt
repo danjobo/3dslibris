@@ -120,6 +120,10 @@ Readwise (GENERAL settings, second page > Readwise):
   What has been uploaded is shared when two consoles sync, so the other
   console doesn't send it again. Deleting a highlight here doesn't
   delete it in Readwise
+- Upload on close (on by default): leaving a book sends that book's
+  new and edited highlights. No Wi-Fi: nothing is sent and nothing is
+  shown. Choose the row to turn it off or on
+- Y on the Readwise screen tests the connection and token
 - Your access token (from readwise.io/access_token) is needed once:
   put it in `sdmc:/3ds/3dslibris/readwise-token.txt` from a computer,
   or choose "Readwise token" and type it. It is stored as plain text
@@ -140,6 +144,9 @@ Hardcover (reading progress, hardcover.app):
   Hardcover edition's page count) and marks it Reading, or Read on the
   last page. No Wi-Fi: nothing is sent and nothing is shown
 - "send progress now" sends it straight away; "unlink" forgets the link
+- Links (and unlinks) are shared when two consoles sync, so a book
+  linked on one is linked on the other. Each console needs its own
+  copy of hardcover-token.txt
 
 Other:
 - X: cycle theme (normal / dark / sepia)

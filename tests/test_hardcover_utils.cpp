@@ -80,6 +80,82 @@ void TestLinksRoundTrip() {
                  1);
 }
 
+void TestUnlinkedEntries() {
+  std::vector<Link> links(1);
+  links[0].sync_id = "a#1";
+  links[0].changed_at = 500;
+  links[0].title = "A";
+  const std::vector<Link> back =
+      hardcover_utils::ParseLinks(hardcover_utils::SerializeLinks(links));
+  test::ExpectEq("unlinked kept", (int)back.size(), 1);
+  test::ExpectEq("changed_at", (int)back[0].changed_at, 500);
+  test::ExpectEq("not a link", hardcover_utils::FindLink(back, "a#1"), -1);
+  test::ExpectEq("but an entry", hardcover_utils::FindEntry(back, "a#1"), 0);
+  test::ExpectEq("v1 rejects book 0",
+                 (int)hardcover_utils::ParseLinks(
+                     "3DSLIBRIS-HARDCOVER 1\na#1\t0\t0\t10\t0\t0\tT\n")
+                     .size(),
+                 0);
+}
+
+Link MakeLink(const char *sync_id, int book_id, uint32_t changed_at,
+              int last_sent = 0) {
+  Link l;
+  l.sync_id = sync_id;
+  l.book_id = book_id;
+  l.pages = 300;
+  l.title = "T";
+  l.changed_at = changed_at;
+  l.last_sent_page = last_sent;
+  return l;
+}
+
+void TestMergeLinks() {
+  // New link from the other console.
+  std::vector<Link> mine;
+  std::vector<Link> theirs(1, MakeLink("a#1", 7, 100));
+  test::ExpectEq("new link counted", hardcover_utils::MergeLinks(&mine, theirs),
+                 1);
+  test::ExpectEq("now linked", hardcover_utils::FindLink(mine, "a#1"), 0);
+
+  // A newer relink wins; an older one doesn't.
+  mine.assign(1, MakeLink("a#1", 7, 100));
+  theirs.assign(1, MakeLink("a#1", 8, 200));
+  test::ExpectEq("relink", hardcover_utils::MergeLinks(&mine, theirs), 1);
+  test::ExpectEq("newer book", mine[0].book_id, 8);
+  theirs.assign(1, MakeLink("a#1", 9, 150));
+  test::ExpectEq("older ignored", hardcover_utils::MergeLinks(&mine, theirs),
+                 0);
+  test::ExpectEq("kept", mine[0].book_id, 8);
+
+  // A newer unlink removes the link; an unlink of an unknown book is kept
+  // quietly.
+  theirs.assign(1, MakeLink("a#1", 0, 300));
+  test::ExpectEq("unlink", hardcover_utils::MergeLinks(&mine, theirs), 1);
+  test::ExpectEq("unlinked", hardcover_utils::FindLink(mine, "a#1"), -1);
+  theirs.assign(1, MakeLink("b#1", 0, 300));
+  test::ExpectEq("unknown unlink", hardcover_utils::MergeLinks(&mine, theirs),
+                 0);
+
+  // The same link: furthest progress, either side's Read.
+  mine.assign(1, MakeLink("a#1", 7, 100, 40));
+  theirs.assign(1, MakeLink("a#1", 7, 100, 90));
+  theirs[0].finished = true;
+  test::ExpectEq("progress not counted",
+                 hardcover_utils::MergeLinks(&mine, theirs), 0);
+  test::ExpectEq("furthest page", mine[0].last_sent_page, 90);
+  test::ExpectTrue("read", mine[0].finished);
+
+  // Both directions agree when linked separately at the same time.
+  std::vector<Link> x(1, MakeLink("a#1", 7, 100));
+  std::vector<Link> y(1, MakeLink("a#1", 8, 100));
+  std::vector<Link> x2 = x, y2 = y;
+  hardcover_utils::MergeLinks(&x2, y);
+  hardcover_utils::MergeLinks(&y2, x);
+  test::ExpectStrEq("converge", hardcover_utils::SerializeLinks(x2).c_str(),
+                    hardcover_utils::SerializeLinks(y2).c_str());
+}
+
 void TestProgressPage() {
   // Halfway through 200 local pages of a 400-page book.
   test::ExpectEq("half", hardcover_utils::ProgressPage(99, 200, 400), 200);
@@ -145,6 +221,8 @@ int main() {
   TestCleanToken();
   TestIsbnFromFileName();
   TestLinksRoundTrip();
+  TestUnlinkedEntries();
+  TestMergeLinks();
   TestProgressPage();
   TestBodies();
   return 0;
