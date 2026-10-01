@@ -36,6 +36,15 @@ void FrameRect(const Surface &s, int x0, int y0, int x1, int y1,
 void BlitScaled(const Surface &s, const uint16_t *src, int src_w, int src_h,
                 int dst_x, int dst_y, int dst_w, int dst_h);
 
+// Anti-aliased shapes. Coordinates are in pixels, with pixel (x, y) covering
+// [x, x+1) x [y, y+1), so a centre of (10, 10) sits on a pixel corner.
+// alpha (0-255) scales the coverage, e.g. for soft shadows.
+void FillCircle(const Surface &s, float cx, float cy, float radius,
+                uint16_t color, int alpha);
+// A line segment `width` pixels wide with round ends.
+void DrawLine(const Surface &s, float x0, float y0, float x1, float y1,
+              float width, uint16_t color);
+
 // Largest size with the source's aspect ratio that fits max_w x max_h. With
 // allow_upscale false the image is never enlarged.
 void FitSize(int src_w, int src_h, int max_w, int max_h, bool allow_upscale,

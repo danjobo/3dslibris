@@ -62,14 +62,38 @@ int DrawBadge(Text *ts, uint16_t *screen, int x, int y, const char *label,
   return w;
 }
 
+void DrawDoneSeal(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
+                  const library_theme_utils::LibraryPalette &pal) {
+  const Surface s = SurfaceFor(ts, screen);
+  const float r = diameter * 0.5f;
+  const float x = (float)cx;
+  const float y = (float)cy;
+  // Shadow, ring, then the green face.
+  library_paint_utils::FillCircle(s, x + 1.0f, y + 1.5f, r, 0x0000, 90);
+  library_paint_utils::FillCircle(s, x, y, r, pal.done_fg, 255);
+  library_paint_utils::FillCircle(s, x, y, r - 1.5f, pal.done_bg, 255);
+  // A slightly lighter top half gives the face some depth.
+  const uint16_t sheen = library_paint_utils::Blend565(pal.done_bg, pal.done_fg, 40);
+  library_paint_utils::FillCircle(s, x, y - r * 0.18f, r * 0.62f, sheen, 70);
+  // Check mark: short stroke down, long stroke up.
+  const float w = diameter >= 20 ? 2.4f : 1.9f;
+  library_paint_utils::DrawLine(s, x - r * 0.42f, y + r * 0.02f,
+                                x - r * 0.12f, y + r * 0.34f, w, pal.done_fg);
+  library_paint_utils::DrawLine(s, x - r * 0.12f, y + r * 0.34f,
+                                x + r * 0.44f, y - r * 0.30f, w, pal.done_fg);
+  const int ext = (int)r + 3;
+  ts->MarkScreenDirtyRect(screen, cx - ext, cy - ext, cx + ext, cy + ext);
+}
+
 void DrawStatusBadge(Text *ts, uint16_t *screen, int x0, int y0, int x1,
                      const library_progress_utils::BookProgress &progress,
                      const library_theme_utils::LibraryPalette &pal) {
-  if (progress.is_new)
+  if (progress.is_new) {
     DrawBadge(ts, screen, x1 - 3, y0 + 3, "NEW", pal.new_bg, pal.new_fg, true);
-  else if (progress.finished)
-    DrawBadge(ts, screen, x1 - 3, y0 + 3, "DONE", pal.done_bg, pal.done_fg,
-              true);
+  } else if (progress.finished) {
+    const int d = 18;
+    DrawDoneSeal(ts, screen, x1 - 3 - d / 2, y0 + 3 + d / 2, d, pal);
+  }
   (void)x0;
 }
 

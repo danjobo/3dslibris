@@ -22,7 +22,7 @@ struct LibraryPalette {
   uint16_t shadow;      // Under covers.
   uint16_t placeholder; // Cover box of a book without a cover.
   uint16_t new_bg, new_fg;
-  uint16_t done_bg, done_fg;
+  uint16_t done_bg, done_fg; // DONE seal: fill, and its ring and check mark
   uint16_t shelf;       // Shelf view planks,
   uint16_t shelf_edge;  // and their darker front edge.
 };

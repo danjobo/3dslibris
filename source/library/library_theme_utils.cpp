@@ -30,8 +30,8 @@ LibraryPalette ForColorMode(int color_mode) {
     p.shadow = Rgb565(0, 0, 0);
     p.new_bg = p.accent;
     p.new_fg = sepia ? Rgb565(40, 28, 18) : Rgb565(10, 20, 40);
-    p.done_bg = sepia ? Rgb565(160, 180, 105) : Rgb565(95, 195, 125);
-    p.done_fg = p.new_fg;
+    p.done_bg = sepia ? Rgb565(110, 140, 70) : Rgb565(52, 160, 96);
+    p.done_fg = sepia ? Rgb565(250, 242, 226) : Rgb565(245, 250, 246);
   } else {
     p.shelf = sepia ? Rgb565(176, 130, 84) : Rgb565(186, 146, 104);
     p.shelf_edge = Blend565(p.shelf, Rgb565(0, 0, 0), 80);
@@ -40,8 +40,8 @@ LibraryPalette ForColorMode(int color_mode) {
     p.shadow = Blend565(p.background, p.text, 70);
     p.new_bg = p.accent;
     p.new_fg = sepia ? Rgb565(252, 244, 228) : Rgb565(255, 255, 255);
-    p.done_bg = sepia ? Rgb565(95, 120, 55) : Rgb565(40, 140, 75);
-    p.done_fg = p.new_fg;
+    p.done_bg = sepia ? Rgb565(96, 128, 58) : Rgb565(38, 150, 84);
+    p.done_fg = sepia ? Rgb565(252, 246, 232) : Rgb565(255, 255, 255);
   }
   return p;
 }

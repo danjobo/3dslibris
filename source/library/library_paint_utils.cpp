@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 
+#include <math.h>
+
 #include <vector>
 
 namespace library_paint_utils {
@@ -195,6 +197,68 @@ void BlitScaled(const Surface &s, const uint16_t *src, int src_w, int src_h,
     BlitBilinear(s, src, src_w, src_h, dst_x, dst_y, dst_w, dst_h);
   else
     BlitBoxAverage(s, src, src_w, src_h, dst_x, dst_y, dst_w, dst_h);
+}
+
+namespace {
+
+// Blends color over pixel (x, y) by coverage 0..1.
+inline void Plot(const Surface &s, int x, int y, uint16_t color,
+                 float coverage) {
+  if (coverage <= 0.0f || !Inside(s, x, y))
+    return;
+  uint16_t *px = s.pixels + (size_t)y * (size_t)s.stride + (size_t)x;
+  *px = coverage >= 1.0f ? color : Blend565(*px, color, (int)(coverage * 255.0f));
+}
+
+inline float Clamp01(float v) {
+  return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+} // namespace
+
+void FillCircle(const Surface &s, float cx, float cy, float radius,
+                uint16_t color, int alpha) {
+  if (!s.pixels || radius <= 0.0f || alpha <= 0)
+    return;
+  const float a = (alpha > 255 ? 255 : alpha) / 255.0f;
+  const int x0 = (int)floorf(cx - radius - 1.0f);
+  const int x1 = (int)ceilf(cx + radius + 1.0f);
+  const int y0 = (int)floorf(cy - radius - 1.0f);
+  const int y1 = (int)ceilf(cy + radius + 1.0f);
+  for (int y = y0; y <= y1; y++) {
+    for (int x = x0; x <= x1; x++) {
+      const float dx = (float)x + 0.5f - cx;
+      const float dy = (float)y + 0.5f - cy;
+      const float dist = sqrtf(dx * dx + dy * dy);
+      Plot(s, x, y, color, Clamp01(radius + 0.5f - dist) * a);
+    }
+  }
+}
+
+void DrawLine(const Surface &s, float x0, float y0, float x1, float y1,
+              float width, uint16_t color) {
+  if (!s.pixels || width <= 0.0f)
+    return;
+  const float half = width * 0.5f;
+  const float vx = x1 - x0;
+  const float vy = y1 - y0;
+  const float len2 = vx * vx + vy * vy;
+  const int bx0 = (int)floorf((x0 < x1 ? x0 : x1) - half - 1.0f);
+  const int bx1 = (int)ceilf((x0 > x1 ? x0 : x1) + half + 1.0f);
+  const int by0 = (int)floorf((y0 < y1 ? y0 : y1) - half - 1.0f);
+  const int by1 = (int)ceilf((y0 > y1 ? y0 : y1) + half + 1.0f);
+  for (int y = by0; y <= by1; y++) {
+    for (int x = bx0; x <= bx1; x++) {
+      const float px = (float)x + 0.5f - x0;
+      const float py = (float)y + 0.5f - y0;
+      float t = len2 > 0.0f ? (px * vx + py * vy) / len2 : 0.0f;
+      t = Clamp01(t);
+      const float dx = px - t * vx;
+      const float dy = py - t * vy;
+      const float dist = sqrtf(dx * dx + dy * dy);
+      Plot(s, x, y, color, Clamp01(half + 0.5f - dist));
+    }
+  }
 }
 
 void FitSize(int src_w, int src_h, int max_w, int max_h, bool allow_upscale,

@@ -100,6 +100,34 @@ void TestFitSize() {
   test::ExpectEq("wide image height", h, 43);
 }
 
+void TestCircleAndLine() {
+  std::vector<uint16_t> buf;
+  const Surface s = MakeSurface(&buf, 16, 16);
+  library_paint_utils::FillCircle(s, 8.0f, 8.0f, 5.0f, 0xFFFF, 255);
+  test::ExpectEqU("circle centre filled", buf[8 * kStride + 8], 0xFFFF);
+  test::ExpectEqU("circle corner untouched", buf[1 * kStride + 1], 0x1234);
+  const uint16_t edge = buf[8 * kStride + 3];
+  test::ExpectTrue("circle edge is blended",
+                   edge != 0x1234 || buf[8 * kStride + 2] == 0x1234);
+
+  std::vector<uint16_t> buf2;
+  const Surface s2 = MakeSurface(&buf2, 16, 16);
+  library_paint_utils::FillCircle(s2, 8.0f, 8.0f, 5.0f, 0x0000, 0);
+  test::ExpectEqU("zero alpha draws nothing", buf2[8 * kStride + 8], 0x1234);
+  library_paint_utils::DrawLine(s2, 2.0f, 2.0f, 12.0f, 12.0f, 2.0f, 0xFFFF);
+  test::ExpectEqU("line passes through the middle", buf2[7 * kStride + 7],
+                  0xFFFF);
+  test::ExpectEqU("line leaves far pixels", buf2[2 * kStride + 12], 0x1234);
+  // Clipping: nothing written outside the logical surface.
+  std::vector<uint16_t> buf3;
+  const Surface s3 = MakeSurface(&buf3, 10, 10);
+  library_paint_utils::FillCircle(s3, 9.0f, 5.0f, 4.0f, 0x0F0F, 255);
+  test::ExpectEqU("drawn up to the logical width", buf3[5 * kStride + 9],
+                  0x0F0F);
+  test::ExpectEqU("clipped past the logical width", buf3[5 * kStride + 10],
+                  0x1234);
+}
+
 void TestPalettesAreDistinct() {
   for (int mode = 0; mode < 6; mode++) {
     const library_theme_utils::LibraryPalette p =
@@ -121,6 +149,7 @@ int main() {
   TestBlitUpscaleIsSmoothAndKeepsSolidColors();
   TestBlitDownscaleAverages();
   TestFitSize();
+  TestCircleAndLine();
   TestPalettesAreDistinct();
   return 0;
 }

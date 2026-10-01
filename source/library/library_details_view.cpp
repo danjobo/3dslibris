@@ -150,7 +150,12 @@ void Draw(Text *ts, Book *book) {
       snprintf(line, sizeof(line), "Not started");
     library_draw::PrintCentered(ts, line, TEXT_STYLE_BROWSER, 0, width, y);
   } else {
-    if (progress.percent >= 0) {
+    if (progress.finished) {
+      // A larger seal in place of the full bar.
+      library_draw::DrawDoneSeal(ts, ts->screenleft, width / 2, y + 10, 24,
+                                 pal);
+      y += 24 + small_step;
+    } else if (progress.percent >= 0) {
       library_draw::DrawProgressBar(ts, ts->screenleft, (width - kBarW) / 2, y,
                                     kBarW, kBarH, progress.percent, pal);
       y += kBarH + small_step;

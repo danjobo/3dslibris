@@ -36,6 +36,11 @@ void DrawProgressBar(Text *ts, uint16_t *screen, int x, int y, int w, int h,
 int DrawBadge(Text *ts, uint16_t *screen, int x, int y, const char *label,
               uint16_t bg, uint16_t fg, bool right_aligned);
 
+// The DONE seal: a green disc with a light ring, a soft shadow and a check
+// mark, `diameter` pixels across, centered on (cx, cy).
+void DrawDoneSeal(Text *ts, uint16_t *screen, int cx, int cy, int diameter,
+                  const library_theme_utils::LibraryPalette &pal);
+
 // NEW or DONE badge for the book's progress, in the top-right corner of the
 // rectangle (x0, y0)-(x1, y1). Nothing for books in progress.
 void DrawStatusBadge(Text *ts, uint16_t *screen, int x0, int y0, int x1,
