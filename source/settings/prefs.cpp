@@ -526,6 +526,12 @@ void Prefs::RememberSavedBookState(
   ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
 }
 
+void Prefs::ForgetBook(const char *folder, const char *filename) {
+  const std::string key = MakeSavedBookKey(folder, filename);
+  saved_state_by_book_key.erase(key);
+  last_opened_by_book_key.erase(key);
+}
+
 void Prefs::ApplySyncedBookPages(const char *folder, const char *filename,
                                  int page,
                                  const std::vector<uint16_t> &bookmarks) {

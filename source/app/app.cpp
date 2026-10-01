@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/sync_controller.h"
+#include "app/delete_book_controller.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -164,6 +165,8 @@ App::App()
   startup_controller_ = std::unique_ptr<StartupController>(new StartupController(*this));
   main_loop_controller_ = std::unique_ptr<MainLoopController>(new MainLoopController(*this));
   sync_controller_ = std::unique_ptr<SyncController>(new SyncController(*this));
+  delete_book_controller_ = std::unique_ptr<DeleteBookController>(
+      new DeleteBookController(*this));
 
   // Initialize prefs view state.
   nav_.prefs.selected_index = -1;

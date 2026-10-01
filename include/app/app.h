@@ -84,6 +84,7 @@ class StatusController;
 class StartupController;
 class MainLoopController;
 class SyncController;
+class DeleteBookController;
 
 #define APP_BROWSER_BUTTON_COUNT 4
 
@@ -293,6 +294,12 @@ public:
   void ShowBookInfoView();
   void ShowSyncView();
   void RunSyncFrame(const FrameInput &input);
+  // Library: hold X on a book to delete it.
+  void ShowDeleteBookView(Book *book);
+  void RunDeleteBookFrame(const FrameInput &input);
+  // Back to the library after a delete (or cancel), rescanning the current
+  // folder and selecting the book now at select_index (-1: no rescan).
+  void ShowLibraryAfterDelete(int select_index);
   // Books were added on disk (sync); rescan when the library is next shown.
   void RequestLibraryRescan() { pending_library_rescan_ = true; }
   bool BookNeedsRelayout(Book *book) const;
@@ -407,6 +414,7 @@ private:
   std::unique_ptr<StartupController> startup_controller_;
   std::unique_ptr<MainLoopController> main_loop_controller_;
   std::unique_ptr<SyncController> sync_controller_;
+  std::unique_ptr<DeleteBookController> delete_book_controller_;
   ReaderRuntimeState reader_state_;
   FILE *status_log_file_;
   unsigned int status_log_write_count_;

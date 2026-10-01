@@ -129,6 +129,40 @@ void LibraryController::ResetBrowserMarquee() { g_marquee.Reset(); }
 // EnqueueJob, QueueBookWarmup, TickBrowserWarmup, QueueTocResolve, ProcessJobs,
 // PauseBrowserJobs) moved to app_browser_jobs.cpp.
 
+// Holding X this long on a book opens the delete screen (as in the reader,
+// where holding X starts text selection).
+static const uint64_t kDeleteHoldMs = 400;
+
+static void CycleColorMode(App &app) {
+  const int next = (app.ts->GetColorMode() + 1) % 6;
+  app.colorMode = next;
+  app.ts->SetColorMode(next);
+  UiButtonSkin_SetColorMode(next);
+  app.ts->MarkAllScreensDirty();
+  g_marquee.Reset();
+  app.SetBrowserDirty(true);
+}
+
+void LibraryController::RefreshCurrentFolder(int select_index) {
+  if (inside_folder_) {
+    const std::string path = current_folder_path_;
+    const std::string name = current_folder_name_;
+    LoadFolderPath(path, name);
+  } else {
+    RebuildRoot();
+  }
+  const int count = app_.BookCount();
+  if (count <= 0)
+    return;
+  const int index = std::max(0, std::min(select_index, count - 1));
+  app_.SetSelectedBook(app_.books[index]);
+  const int page_size = CurrentBrowserPageSize(app_);
+  if (page_size > 0)
+    app_.SetBrowserPageStart(index - index % page_size);
+  LoadVisibleBrowserCoverCaches();
+  app_.SetBrowserDirty(true);
+}
+
 void LibraryController::browser_handleevent(const FrameInput &input) {
   if (app_.ShouldAbortWork())
     return;
@@ -211,6 +245,22 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
     return;
   }
 
+  // X was pressed earlier: released soon it cycles the theme, held on a
+  // book it offers to delete the book.
+  if (x_hold_armed_) {
+    if (!(input.keys_held & app_.key.x)) {
+      x_hold_armed_ = false;
+      CycleColorMode(app_);
+    } else if (input.timestamp_ms - x_down_ms_ >= kDeleteHoldMs) {
+      x_hold_armed_ = false;
+      Book *selected = app_.GetSelectedBook();
+      if (selected && !selected->IsBrowserFolder()) {
+        app_.ShowDeleteBookView(selected);
+        return;
+      }
+    }
+  }
+
   auto navigateSelection = [&](BrowserNavMove move) {
     if (app_.BookCount() <= 0)
       return;
@@ -286,14 +336,9 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
   }
 
   else if (keys & app_.key.x) {
-    int mode = app_.ts->GetColorMode();
-    int next = (mode + 1) % 6;
-    app_.colorMode = next;
-    app_.ts->SetColorMode(next);
-    UiButtonSkin_SetColorMode(next);
-    app_.ts->MarkAllScreensDirty();
-    g_marquee.Reset();
-    app_.SetBrowserDirty(true);
+    // Decided on release or after the hold time (see above).
+    x_hold_armed_ = true;
+    x_down_ms_ = input.timestamp_ms;
   }
 
   else if (keys & (app_.key.select | app_.key.y)) {

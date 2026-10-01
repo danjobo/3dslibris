@@ -38,7 +38,9 @@ Notes:
 - D-Pad / Circle Pad: move selection
 - A: open selected book
 - B: back
-- X / Y: quick actions in library (depends on current view)
+- X: cycle theme; hold X on a book to delete it (you can keep or
+  remove its highlights and notes; built-in books can't be deleted)
+- Y: open GENERAL settings
 - Touch: select/open books and use UI buttons
 
 Tip:

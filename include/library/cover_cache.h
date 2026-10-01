@@ -21,5 +21,8 @@ static const uint8_t kMaxAttempts = 3;
 bool TryLoad(Book *book, const std::string &book_path);
 bool Save(Book *book, const std::string &book_path);
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path);
+// The thumbnail file for a book (call while the book file still exists:
+// its size and date are part of the name).
+std::string PathFor(Book *book, const std::string &book_path);
 
 } // namespace cover_cache

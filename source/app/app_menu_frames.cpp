@@ -8,6 +8,7 @@
 
 #include "app/app.h"
 #include "app/sync_controller.h"
+#include "app/delete_book_controller.h"
 
 #include <3ds.h>
 #include <ctype.h>
@@ -663,6 +664,11 @@ void App::RunFontMenuFrame(const FrameInput &input)
 void App::RunSyncFrame(const FrameInput &input)
 {
   sync_controller_->RunFrame(input);
+}
+
+void App::RunDeleteBookFrame(const FrameInput &input)
+{
+  delete_book_controller_->RunFrame(input);
 }
 
 void App::RunBookmarksMenuFrame(const FrameInput &input)

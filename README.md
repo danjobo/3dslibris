@@ -87,6 +87,7 @@ Library:
 - `A`: open selected book
 - `L` / `R`: previous or next library page
 - `Touch`: select and open books
+- `X`: change background color; hold `X` on a book to delete it
 - `Y` / `Select`: open `GENERAL` settings
 
 Standard reading:

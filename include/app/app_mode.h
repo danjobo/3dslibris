@@ -17,4 +17,5 @@ enum class AppMode : u8
   Opening = 10,
   BookInfo = 11,
   Sync = 12,
+  DeleteBook = 13,
 };

@@ -10,6 +10,7 @@
 
 #include "app/app.h"
 #include "app/sync_controller.h"
+#include "app/delete_book_controller.h"
 #include "app/library_controller.h"
 
 #include <3ds.h>
@@ -238,6 +239,22 @@ void App::ShowSyncView()
   ApplyRenderOrientation(portrait_orientation);
   nav_.mode = AppMode::Sync;
   sync_controller_->Show();
+}
+
+void App::ShowDeleteBookView(Book *book)
+{
+  if (!book || book->IsBrowserFolder())
+    return;
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::DeleteBook;
+  delete_book_controller_->Show(book);
+}
+
+void App::ShowLibraryAfterDelete(int select_index)
+{
+  if (select_index >= 0)
+    library_controller_->RefreshCurrentFolder(select_index);
+  ShowLibraryView();
 }
 
 void App::ShowBookInfoView()

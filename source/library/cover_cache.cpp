@@ -308,6 +308,10 @@ bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   return true;
 }
 
+std::string PathFor(Book *book, const std::string &book_path) {
+  return BuildCoverCachePath(book, book_path);
+}
+
 bool Save(Book *book, const std::string &book_path) {
   if (!book || !book->coverPixels || book->coverWidth <= 0 ||
       book->coverHeight <= 0) {
