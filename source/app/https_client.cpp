@@ -7,12 +7,14 @@
 #include "app/https_client.h"
 
 #include <3ds.h>
+#include <arpa/inet.h>
 #include <curl/curl.h>
 #include <algorithm>
 #include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "shared/path_constants.h"
 
@@ -44,7 +46,8 @@ std::string CaBundlePath() {
 }
 
 Session::Session()
-    : soc_buffer_(NULL), soc_ready_(false), curl_ready_(false), ok_(false) {
+    : soc_buffer_(NULL), soc_ready_(false), curl_ready_(false), handle_(NULL),
+      ok_(false) {
   soc_buffer_ = memalign(0x1000, kSocBufferSize);
   if (!soc_buffer_) {
     error_ = "Out of memory";
@@ -66,10 +69,22 @@ Session::Session()
     return;
   }
   curl_ready_ = true;
+  handle_ = curl_easy_init();
+  if (!handle_) {
+    error_ = "Couldn't start the request";
+    return;
+  }
   ok_ = true;
 }
 
+bool Session::HasNetwork() const {
+  // This console's address, or 0 when it isn't on a network.
+  return soc_ready_ && gethostid() != 0;
+}
+
 Session::~Session() {
+  if (handle_)
+    curl_easy_cleanup((CURL *)handle_);
   if (curl_ready_)
     curl_global_cleanup();
   if (soc_ready_)
@@ -77,15 +92,17 @@ Session::~Session() {
   free(soc_buffer_);
 }
 
-bool Request(const std::string &method, const std::string &url,
-             const std::vector<std::string> &headers, const std::string &body,
-             Response *out, long timeout_seconds) {
+bool Request(Session &session, const std::string &method,
+             const std::string &url, const std::vector<std::string> &headers,
+             const std::string &body, Response *out, long timeout_seconds) {
   *out = Response();
-  CURL *curl = curl_easy_init();
-  if (!curl) {
-    out->error = "Couldn't start the request";
+  CURL *curl = (CURL *)session.handle();
+  if (!session.ok() || !curl) {
+    out->error = session.error().empty() ? "Not connected" : session.error();
     return false;
   }
+  // Clears the previous request's options; the connection stays open.
+  curl_easy_reset(curl);
   char error_buf[CURL_ERROR_SIZE] = {0};
   const std::string ca = CaBundlePath();
   struct curl_slist *header_list = NULL;
@@ -122,8 +139,10 @@ bool Request(const std::string &method, const std::string &url,
              error_buf[0] ? error_buf : curl_easy_strerror(rc), (int)rc);
     out->error = buf;
   }
+  // The options point at this call's buffers; don't leave them dangling.
+  curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, NULL);
+  curl_easy_setopt(curl, CURLOPT_HTTPHEADER, NULL);
   curl_slist_free_all(header_list);
-  curl_easy_cleanup(curl);
   return rc == CURLE_OK;
 }
 

@@ -217,7 +217,7 @@ void ReadwiseController::Upload() {
     const std::vector<readwise_api_utils::Highlight> batch(
         pending.begin() + start, pending.begin() + end);
     https_client::Response response;
-    if (!https_client::Request("POST", kHighlightsUrl, headers,
+    if (!https_client::Request(session, "POST", kHighlightsUrl, headers,
                                readwise_api_utils::BuildHighlightsJson(batch),
                                &response, 60)) {
       failure = "Couldn't reach Readwise: " + response.error;
@@ -295,7 +295,8 @@ void ReadwiseController::CheckToken() {
   https_client::Response response;
   const bool reached =
       session.ok() &&
-      https_client::Request("GET", kAuthUrl, AuthHeaders(token), "", &response);
+      https_client::Request(session, "GET", kAuthUrl, AuthHeaders(token), "",
+                            &response);
   if (reached && (response.status == 401 || response.status == 403)) {
     SetLines("Readwise didn't accept that token.", "Nothing was saved.");
     return;
@@ -321,7 +322,7 @@ void ReadwiseController::TestConnection() {
   const u64 start = osGetTime();
   https_client::Response response;
   const bool ok = https_client::Request(
-      "GET", kAuthUrl,
+      session, "GET", kAuthUrl,
       token.empty() ? std::vector<std::string>() : AuthHeaders(token), "",
       &response);
   char took[48];

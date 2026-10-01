@@ -15,18 +15,24 @@
 
 namespace https_client {
 
-// Sockets and libcurl for the lifetime of the object.
+// Sockets and libcurl for the lifetime of the object. Requests made
+// through one Session reuse its connection, so only the first one to a
+// server pays for the TLS handshake (~2.5 s on Old 3DS).
 class Session {
 public:
   Session();
   ~Session();
   bool ok() const { return ok_; }
   const std::string &error() const { return error_; }
+  // False when the console isn't connected to a network.
+  bool HasNetwork() const;
+  void *handle() const { return handle_; }
 
 private:
   void *soc_buffer_;
   bool soc_ready_;
   bool curl_ready_;
+  void *handle_; // CURL easy handle, kept for its connection
   bool ok_;
   std::string error_;
 };
@@ -40,8 +46,9 @@ struct Response {
 
 static const size_t kMaxBodyBytes = 64 * 1024;
 
-// method: "GET", "POST", ... headers: "Name: value". Needs a Session.
-bool Request(const std::string &method, const std::string &url,
+// method: "GET", "POST", ... headers: "Name: value".
+bool Request(Session &session, const std::string &method,
+             const std::string &url,
              const std::vector<std::string> &headers, const std::string &body,
              Response *out, long timeout_seconds = 30);
 
