@@ -43,6 +43,7 @@ SOURCES		:=	source \
 			source/library \
 			source/reader \
 			source/settings \
+			source/sync \
 			source/book \
 			source/formats/common \
 			source/formats/epub \
