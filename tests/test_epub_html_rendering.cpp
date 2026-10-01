@@ -1139,6 +1139,88 @@ void TestLargeFontPaginationDoesNotDropTextAcrossPages() {
              actual.find(expected) != std::string::npos);
 }
 
+// Draws every page with the pen-tracking Text stub (TextRenderer's line and
+// clip rules) and fails if the renderer would drop or clip any text. Being
+// present in a page buffer is not enough: text the paginator places below
+// the screen's usable height is silently never drawn.
+void ExpectAllPagesRenderCompletely(const char *label, TestCtx &tc,
+                                    Book &book, int base_px) {
+  static u16 left_buf[400 * 400];
+  static u16 right_buf[400 * 400];
+  tc.text.screenleft = left_buf;
+  tc.text.screenright = right_buf;
+  tc.text.screen = left_buf;
+  tc.text.track_pen = true;
+  for (int i = 0; i < book.GetPageCount(); i++) {
+    Page *page = book.GetPage(i);
+    book.SetPosition(i);
+    tc.text.clipped_glyphs = 0;
+    tc.text.SetPixelSize((u8)base_px);
+    page->Draw(&tc.text);
+    if (page->GetLastDrawDroppedChars() != 0 || tc.text.clipped_glyphs != 0) {
+      fprintf(stderr, "FAIL %s: page %d/%d dropped=%d clipped=%d\n", label,
+              i + 1, (int)book.GetPageCount(), page->GetLastDrawDroppedChars(),
+              tc.text.clipped_glyphs);
+      std::exit(1);
+    }
+  }
+  tc.text.track_pen = false;
+  g_pass++;
+}
+
+std::string SmallFontParagraphsHtml() {
+  // Like many trade EPUBs: body paragraphs in a smaller CSS font than the
+  // reader's base size, so every paragraph opens and closes a font scope.
+  // Lengths vary so paragraphs end, and cross from the 400px first screen
+  // onto the 320px second screen, at many different positions.
+  std::string html = "<html><body>";
+  int word = 0;
+  for (int para = 0; para < 60; para++) {
+    html += "<p class=\"tx\">";
+    const int words = 4 + (para * 37) % 90;
+    for (int w = 0; w < words; w++) {
+      char buf[16];
+      snprintf(buf, sizeof(buf), "%sw%04d", w ? " " : "", word++);
+      html += buf;
+    }
+    html += "</p>";
+  }
+  html += "</body></html>";
+  return html;
+}
+
+void TestSmallFontParagraphsRenderWithoutDroppedLines() {
+  const char *kCss = ".tx { font-size: small; text-indent: 1em; }";
+  const int kSizes[] = {12, 14, 16, 20};
+  const int kSpacings[] = {0, 2};
+  for (size_t s = 0; s < sizeof(kSizes) / sizeof(kSizes[0]); s++) {
+    for (size_t l = 0; l < sizeof(kSpacings) / sizeof(kSpacings[0]); l++) {
+      TestCtx tc;
+      tc.text.SetPixelSize((u8)kSizes[s]);
+      tc.text.linespacing = kSpacings[l];
+      tc.text.display.width = 240; // portrait reading width
+      unsigned char orientation = 0;
+      tc.ctx.orientation = &orientation;
+      tc.paragraph_spacing = 0;
+      Book book(tc.ctx);
+      parsedata_t p = MakeParseData(tc, book);
+      p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+      epub_css_class_map::ParseCssIntoClassMap(kCss, strlen(kCss),
+                                               &p.css_class_map);
+      xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+      const xml_parse_utils::XmlParseResult r =
+          xml_parse_utils::ParseXmlString(SmallFontParagraphsHtml(), opts);
+      ExpectTrue("small-font-render: parse ok", r.ok);
+      ExpectTrue("small-font-render: spans multiple pages",
+                 book.GetPageCount() > 2);
+      char label[64];
+      snprintf(label, sizeof(label), "small-font-render px=%d ls=%d",
+               kSizes[s], kSpacings[l]);
+      ExpectAllPagesRenderCompletely(label, tc, book, kSizes[s]);
+    }
+  }
+}
+
 } // namespace
 
 int main() {
@@ -1166,6 +1248,7 @@ int main() {
   TestImageOnlyParagraphKeepsExplicitBottomMargin();
   TestPageBreakBeforeAlwaysUsesHardBreak();
   TestLargeFontPaginationDoesNotDropTextAcrossPages();
+  TestSmallFontParagraphsRenderWithoutDroppedLines();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

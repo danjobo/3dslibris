@@ -30,14 +30,19 @@ struct FlowEmitMetrics {
   // Applied to pen.x before the first word is emitted; wrap lines are not
   // indented (they reset pen.x to margin_left, not margin_left+text_indent).
   int text_indent_px;
-  // Per-reading-screen geometry, indexed by parse screen (0/1). Only valid in
-  // landscape, where the two screens wrap at different widths (400 vs 320);
-  // when false the fragment-start fields above apply to both screens and
-  // portrait pagination stays byte-identical to the pre-landscape code.
+  // Per-reading-screen geometry, indexed by parse screen (0/1), so a text
+  // run that crosses from the first screen to the second uses the second
+  // screen's limits. Landscape screens differ in width (400 vs 320), portrait
+  // screens in height (400 vs 320). When false (tests that don't populate
+  // it) the fragment-start fields above apply to both screens.
   bool per_screen_valid;
   int screen_width_by_screen[2];
   int screen_max_height_by_screen[2];
   int screen_bottom_margin_by_screen[2];
+  // Line height the renderer will use for a line break at the current end of
+  // the page buffer (it can differ from lineheight when a font-size change
+  // has been applied to the parser but not yet emitted). Null: lineheight.
+  int (*emitted_line_height)(parsedata_t *p);
 };
 
 typedef void (*AdvancePageOnOverflowFn)(parsedata_t *p, int lineheight,

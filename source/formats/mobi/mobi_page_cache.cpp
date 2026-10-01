@@ -17,7 +17,7 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 21;
+static const u16 kMobiPageCacheVersion = 22;
 static const size_t kPageCacheIoBufferBytes = 262144;
 
 struct MobiPageCacheHeader {

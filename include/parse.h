@@ -116,6 +116,25 @@ struct parsedata_t {
 	u8 style_font_size_restore_stack[32]; // pre-change px to restore on element close; 0 = no change
 	bool text_transform_word_start;
 	u8 base_font_size_px;
+	// Font size the renderer will be using at the end of the page buffer:
+	// the argument of the last TEXT_FONT_SIZE token written to this page, or
+	// 0 when none has been (the renderer then uses the reader's base size).
+	// Line breaks must be measured with this size, not the parser's current
+	// one, which can already be ahead (e.g. the next paragraph's font is set
+	// before the pending paragraph break is flushed).
+	u8 emitted_font_size_px;
+	bool emitted_font_size_arg_pending;
+	// emitted_font_size_px at the last '\n' written: the size the renderer
+	// uses if it runs out of room at that line break and switches screens.
+	u8 emitted_font_size_px_at_newline;
+	// The reader's font size, which the renderer starts every page with;
+	// recorded at <body> start (0 until then). Kept separate from
+	// base_font_size_px, which heading/inline sizing uses differently.
+	u8 render_base_font_size_px;
+#ifdef DSLIBRIS_TEST_HOOKS
+	// Host diagnosis only: "<page>:<screen>:<pen.y> " at every '\n' written.
+	std::string *debug_newline_trace;
+#endif
 	u8 css_px_baseline; // publisher's body font-size px (default 16 = CSS standard)
 	bool coalesce_text_segments;
 	std::string inline_text_tail;

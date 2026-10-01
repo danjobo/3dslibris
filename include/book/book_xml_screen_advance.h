@@ -18,6 +18,9 @@ struct MarginTopResult;
 namespace book_xml_screen_advance {
 
 // Emit a '\n' token and advance pen to the next line.
+// Line height of the font size the renderer will be in at the end of the
+// current page buffer (see parsedata_t::emitted_font_size_px).
+int EmittedLineHeight(parsedata_t *p);
 void Linefeed(parsedata_t *p);
 
 // True if the last two bytes in the page buffer are both '\n' (blank line).

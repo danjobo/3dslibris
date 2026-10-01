@@ -284,7 +284,7 @@ static void EmitPreformattedUtf8Segment(
       if (cp == '\n') {
         parse_append_page_byte(p, '\n');
         p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
+        p->pen.y += (book_xml_screen_advance::EmittedLineHeight(p) + linespacing);
         p->linebegan = false;
         fns.advance_page_overflow(p, lineheight);
         offset += step;
@@ -332,7 +332,7 @@ static void EmitPreformattedUtf8Segment(
     if (unit.text.codepoint == '\n') {
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
-      p->pen.y += (lineheight + linespacing);
+      p->pen.y += (book_xml_screen_advance::EmittedLineHeight(p) + linespacing);
       p->linebegan = false;
       fns.advance_page_overflow(p, lineheight);
       unit_index++;
@@ -357,7 +357,7 @@ static void EmitPreformattedUtf8Segment(
             ReadingWidthForParseScreen(p, ts) - ts->margin.right)) {
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
-      p->pen.y += (lineheight + linespacing);
+      p->pen.y += (book_xml_screen_advance::EmittedLineHeight(p) + linespacing);
       p->linebegan = false;
       fns.advance_page_overflow(p, lineheight);
     }
@@ -385,7 +385,7 @@ static void EmitPreformattedUtf8Segment(
         pre_run[unit_index].text.codepoint != '\n') {
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
-      p->pen.y += (lineheight + linespacing);
+      p->pen.y += (book_xml_screen_advance::EmittedLineHeight(p) + linespacing);
       p->linebegan = false;
       fns.advance_page_overflow(p, lineheight);
     }
@@ -530,6 +530,25 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
           emit_metrics.screen_width_by_screen[(p->screen >= 0 && p->screen < 2)
                                                   ? p->screen
                                                   : 0];
+    } else {
+      // Portrait screens share a width but not a height (400 vs 320). A text
+      // run that starts on the first screen and continues onto the second
+      // must stop at the second screen's bottom; with only the start screen's
+      // height it laid out lines past the bottom of the 320px screen, and
+      // the renderer then dropped them (text missing between pages).
+      emit_metrics.per_screen_valid = true;
+      for (int s = 0; s < 2; s++) {
+        emit_metrics.screen_width_by_screen[s] = ts->display.width;
+        const text_render_layout_utils::ReadingScreenMetrics sm =
+            text_render_layout_utils::ResolveReadingScreenMetricsForOrientation(
+                parse_orientation, s, ts->margin.bottom,
+                text_render_layout_utils::ResolveCompactReadingBottomMargin(
+                    ts->margin.bottom));
+        emit_metrics.screen_max_height_by_screen[s] = sm.max_height;
+        emit_metrics.screen_bottom_margin_by_screen[s] =
+            text_render_layout_utils::ApplyLineHeightPaginationGuard(
+                sm.bottom_margin, lineheight);
+      }
     }
   }
   emit_metrics.base_margin_left = ts->margin.left;
@@ -537,6 +556,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
   emit_metrics.margin_right = ts->margin.right + p->block_margin_right;
   emit_metrics.lineheight = lineheight;
   emit_metrics.linespacing = linespacing;
+  emit_metrics.emitted_line_height = book_xml_screen_advance::EmittedLineHeight;
   emit_metrics.spaceadvance = spaceadvance;
   emit_metrics.text_already_transformed = text_already_transformed;
 
@@ -608,7 +628,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
 
   if (p->buflen == 0) {
     p->pen.x = ts->margin.left;
-    p->pen.y = ts->margin.top + lineheight;
+    p->pen.y = ts->margin.top + book_xml_screen_advance::EmittedLineHeight(p);
     p->linebegan = false;
     book_xml_screen_advance::ClearPendingBlockSpacing(p); // already at top of screen; discard spacing
   } else {
@@ -734,7 +754,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
         break;
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
-      p->pen.y += (lineheight + linespacing);
+      p->pen.y += (book_xml_screen_advance::EmittedLineHeight(p) + linespacing);
       p->linebegan = false;
       fns.advance_page_overflow(p, lineheight);
       start = nl + 1;

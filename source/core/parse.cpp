@@ -33,6 +33,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 
 #include "shared/text_token_constants.h"
+#ifdef DSLIBRIS_TEST_HOOKS
+#include "book/book.h"
+#include "ui/text.h"
+#endif
 
 bool iswhitespace(u32 c) {
   switch (c) {
@@ -52,6 +56,10 @@ void parse_reset_page_buffer(parsedata_t *data) {
   data->buflen = 0;
   data->pagebuf_overflowed = false;
   data->pagebuf_overflow_bytes = 0;
+  // Each page is drawn starting from the reader's base font size.
+  data->emitted_font_size_px = 0;
+  data->emitted_font_size_arg_pending = false;
+  data->emitted_font_size_px_at_newline = 0;
 }
 
 static void parse_note_page_buffer_overflow(parsedata_t *data, size_t bytes) {
@@ -59,6 +67,19 @@ static void parse_note_page_buffer_overflow(parsedata_t *data, size_t bytes) {
     return;
   data->pagebuf_overflowed = true;
   data->pagebuf_overflow_bytes += bytes;
+}
+
+// Follows TEXT_FONT_SIZE tokens as they are written, so the parser knows
+// which font size the renderer will be in at the end of the buffer.
+static void parse_track_emitted_font_size(parsedata_t *data, u32 c) {
+  if (data->emitted_font_size_arg_pending) {
+    data->emitted_font_size_px = (u8)c;
+    data->emitted_font_size_arg_pending = false;
+  } else if (c == TEXT_FONT_SIZE) {
+    data->emitted_font_size_arg_pending = true;
+  } else if (c == '\n') {
+    data->emitted_font_size_px_at_newline = data->emitted_font_size_px;
+  }
 }
 
 bool parse_append_page_byte(parsedata_t *data, u32 c) {
@@ -69,6 +90,17 @@ bool parse_append_page_byte(parsedata_t *data, u32 c) {
     return false;
   }
   data->buf[data->buflen++] = c;
+  parse_track_emitted_font_size(data, c);
+#ifdef DSLIBRIS_TEST_HOOKS
+  if (c == '\n' && data->debug_newline_trace) {
+    char entry[64];
+    snprintf(entry, sizeof(entry), "%d:%d:%d/e%d/t%d ",
+             data->book ? (int)data->book->GetPageCount() : -1,
+             data->screen, data->pen.y, (int)data->emitted_font_size_px,
+             data->ts ? (int)data->ts->GetPixelSize() : -1);
+    *data->debug_newline_trace += entry;
+  }
+#endif
   return true;
 }
 
@@ -97,6 +129,8 @@ size_t parse_append_page_bytes(parsedata_t *data, const u32 *src, size_t len) {
   const size_t written = (len < available) ? len : available;
   memcpy(data->buf + data->buflen, src, written * sizeof(u32));
   data->buflen += (int)written;
+  for (size_t i = 0; i < written; i++)
+    parse_track_emitted_font_size(data, src[i]);
   if (written < len)
     parse_note_page_buffer_overflow(data, len - written);
   return written;
@@ -147,6 +181,13 @@ void parse_init(parsedata_t *data) {
   data->last_block_was_standalone_band_image = false;
   data->text_transform_word_start = true;
   data->base_font_size_px = 0;
+  data->emitted_font_size_px = 0;
+  data->emitted_font_size_arg_pending = false;
+  data->emitted_font_size_px_at_newline = 0;
+  data->render_base_font_size_px = 0;
+#ifdef DSLIBRIS_TEST_HOOKS
+  data->debug_newline_trace = NULL;
+#endif
   data->css_px_baseline = 16;
   data->coalesce_text_segments = false;
   data->inline_text_tail.clear();

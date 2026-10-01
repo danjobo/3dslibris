@@ -161,6 +161,7 @@ Page::Page(Book *b) {
   start = 0;
   end = 0;
   cached_inline_link_count_ = -1;
+  last_draw_dropped_chars_ = 0;
 }
 
 Page::~Page() { buf = NULL; }
@@ -1056,10 +1057,10 @@ void Page::Draw(Text *ts) {
   }
 
   flush_render_line("page-end");
-#ifdef DSLIBRIS_DEBUG
   // The draw loop stops when the second screen is full. If the paginator
   // put more text on this page than fits, that text is never shown (the
   // next page starts after it), which reads as words missing between pages.
+  last_draw_dropped_chars_ = 0;
   if (i < length) {
     annotation_text_utils::VisibleText rest;
     annotation_text_utils::ExtractVisibleText(buf + i, length - i, &rest);
@@ -1073,6 +1074,8 @@ void Page::Draw(Text *ts) {
       if (sample.size() < 60)
         sample.push_back(ch < 128 ? (char)ch : '?');
     }
+    last_draw_dropped_chars_ = (int)visible;
+#ifdef DSLIBRIS_DEBUG
     if (visible > 0) {
       DBG_LOGF(ts->GetReporter(),
                "PAGE draw dropped text page=%d/%d visible_chars=%u "
@@ -1082,8 +1085,10 @@ void Page::Draw(Text *ts) {
                (int)ts->GetPenY(), (int)ts->GetHeight(), ts->linespacing,
                (int)ts->GetPixelSize(), sample.c_str());
     }
-  }
+#else
+    (void)sample;
 #endif
+  }
   if (in_preformatted_block)
     ts->SetClipToContentEnabled(saved_clip_to_content);
   ts->ClearTextColorOverride();

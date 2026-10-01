@@ -16,6 +16,17 @@
 #define EPUB_LINE_TRACE 0
 #endif
 
+namespace {
+
+// Vertical step for a line break, measured like the renderer measures it.
+int NewlineStep(parsedata_t *p, const book_xml_text_emit::FlowEmitMetrics &m) {
+  const int line_height =
+      m.emitted_line_height ? m.emitted_line_height(p) : m.lineheight;
+  return line_height + m.linespacing;
+}
+
+} // namespace
+
 namespace book_xml_text_emit {
 
 namespace {
@@ -344,7 +355,7 @@ void EmitFlowedShapedText(
                             advance_ctx);
         // Advance pen.y only if no screen advance occurred.
         if (p->pen.y == pen_y_before)
-          p->pen.y += (metrics.lineheight + metrics.linespacing);
+          p->pen.y += NewlineStep(p, metrics);
       }
 
       if (p->in_paragraph)
@@ -434,7 +445,7 @@ void EmitFlowedShapedText(
         AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                             advance_ctx);
         if (p->pen.y == pen_y_before)
-          p->pen.y += (metrics.lineheight + metrics.linespacing);
+          p->pen.y += NewlineStep(p, metrics);
       }
       continue;
     }
@@ -458,7 +469,7 @@ void EmitFlowedShapedText(
                             advance_ctx);
         AlignFreshLineToEffectiveLeftMargin(p, metrics);
         if (nbsp_did_wrap && p->pen.y == pen_y_before_nbsp)
-          p->pen.y += (metrics.lineheight + metrics.linespacing);
+          p->pen.y += NewlineStep(p, metrics);
         EmitFreshLineStartX(p, metrics);
         if (metrics.text_already_transformed) {
           AppendParsedCodepointsRaw(p, txt + unit.text.byte_offset,
@@ -519,7 +530,7 @@ void EmitFlowedShapedText(
 #endif
       parse_append_page_byte(p, '\n');
       p->pen.x = metrics.margin_left;
-      p->pen.y += (metrics.lineheight + metrics.linespacing);
+      p->pen.y += NewlineStep(p, metrics);
       p->linebegan = false;
 #if defined(DSLIBRIS_DEBUG) && EPUB_LINE_TRACE
       TraceParserLineEvent(p, metrics, "wrap-width-after", p->pen.y,

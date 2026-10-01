@@ -241,6 +241,10 @@ bool HandleBlockElementStart(
     }
   } else if (!strcmp(el, "body")) {
     parse_push(p, TAG_BODY);
+    // No font-size scope can be open yet: this is the reader's base size,
+    // which the renderer starts every page with.
+    if (p->render_base_font_size_px == 0)
+      p->render_base_font_size_px = (u8)ts->GetPixelSize();
     p->last_body_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_body_class = book_xml_css_resolver::ExtractClassAttr(attr);
   } else if (!strcmp(el, "div")) {
@@ -486,7 +490,7 @@ bool HandleBlockElementStart(
       parse_append_page_byte(p, x0_u);
       parse_append_page_byte(p, x1_u);
       p->current_screen_has_drawable_content = true;
-      p->pen.y += ts->GetHeight() + ts->linespacing;
+      p->pen.y += book_xml_screen_advance::EmittedLineHeight(p) + ts->linespacing;
       p->pen.x = ts->margin.left;
       p->linebegan = false;
     }

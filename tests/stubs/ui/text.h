@@ -61,11 +61,35 @@ public:
   IStatusReporter *GetReporter() const { return nullptr; }
   void SetFontDir(const std::string &) {}
 
-  // Pen / position
-  void InitPen() {}
-  u16 GetPenX() { return 0; }
-  u16 GetPenY() { return 0; }
-  void SetPen(u16, u16) {}
+  // Pen / position. With track_pen set, the pen follows TextRenderer's rules
+  // (InitPen, PrintNewLine, glyph advance and bottom clipping) so Page::Draw
+  // can be checked on the host; clipped_glyphs counts glyphs the real
+  // renderer would silently skip below the bottom margin.
+  bool track_pen = false;
+  int pen_x = 0;
+  int pen_y = 0;
+  int clipped_glyphs = 0;
+  // Optional: records each line advance ("<screen>:<baseline>") for tests
+  // that compare renderer line positions against the paginator.
+  std::string *line_trace = nullptr;
+
+  void InitPen() {
+    if (!track_pen)
+      return;
+    pen_x = margin.left;
+    pen_y = margin.top + GetHeight();
+  }
+  u16 GetPenX() { return track_pen ? (u16)pen_x : 0; }
+  u16 GetPenY() { return track_pen ? (u16)pen_y : 0; }
+  void SetPen(u16 x, u16 y) {
+    if (!track_pen)
+      return;
+    pen_x = x;
+    pen_y = y;
+  }
+  int CurrentScreenHeight() const {
+    return LogicalHeightFor(screen == screenleft);
+  }
 
   // Geometry. The stub keeps display.* configurable per test, so the buffer
   // stride and logical width mirror it instead of the real fixed constants.
@@ -86,10 +110,35 @@ public:
 
   // Drawing
   void FillRect(u16, u16, u16, u16, u16) {}
-  bool PrintNewLine() { return false; }
+  bool PrintNewLine() {
+    if (!track_pen)
+      return false;
+    pen_x = margin.left;
+    const int height = GetHeight();
+    const int y = pen_y + height + linespacing;
+    if (y > CurrentScreenHeight() - margin.bottom) {
+      if (screen == screenleft) {
+        screen = screenright;
+        pen_y = margin.top + height;
+        return true;
+      }
+      return false;
+    }
+    pen_y += height + linespacing;
+    if (line_trace)
+      *line_trace += std::string(screen == screenleft ? "L" : "R") + ":" +
+                     std::to_string(pen_y) + " ";
+    return true;
+  }
   void ClearScreen() {}
-  void PrintChar(u32) {}
-  void PrintChar(u32, u8) {}
+  void PrintChar(u32 c) { PrintChar(c, 0); }
+  void PrintChar(u32 c, u8 style) {
+    if (!track_pen)
+      return;
+    if (c != ' ' && pen_y > CurrentScreenHeight() - margin.bottom)
+      clipped_glyphs++;
+    pen_x += GetAdvance(c, style);
+  }
   void PrintString(const char *) {}
   void PrintString(const char *, u8) {}
 

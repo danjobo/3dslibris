@@ -71,12 +71,41 @@ static int CountFloorLineSlots(int pen_y, int max_height,
 
 namespace book_xml_screen_advance {
 
+// Line height for an emitted font size as tracked in parsedata_t
+// (0 = the renderer's base size).
+static int LineHeightForEmittedSize(parsedata_t *p, int emitted_px) {
+  if (!p || !p->ts)
+    return 0;
+  Text *ts = p->ts;
+  const int current_px = (int)ts->GetPixelSize();
+  if (emitted_px == 0) {
+    // No size token on this page yet: the renderer uses the reader's base
+    // size, recorded at <body> start (before that, no font scope can be
+    // open, so the current size is the base size).
+    emitted_px = p->render_base_font_size_px ? (int)p->render_base_font_size_px
+                                             : current_px;
+  }
+  if (emitted_px <= 0 || emitted_px == current_px)
+    return ts->GetHeight();
+  ts->SetPixelSize((u8)emitted_px);
+  const int height = ts->GetHeight();
+  ts->SetPixelSize((u8)current_px);
+  return height;
+}
+
+int EmittedLineHeight(parsedata_t *p) {
+  return p ? LineHeightForEmittedSize(p, (int)p->emitted_font_size_px) : 0;
+}
+
 void Linefeed(parsedata_t *p) {
   if (!p || !p->ts)
     return;
+  // Measure the break the way the renderer will: with the font size in
+  // effect at this point of the page buffer.
+  const int line_height = EmittedLineHeight(p);
   parse_append_page_byte(p, '\n');
   p->pen.x = p->ts->margin.left;
-  p->pen.y += p->ts->GetHeight() + p->ts->linespacing;
+  p->pen.y += line_height + p->ts->linespacing;
   p->linebegan = false;
 }
 
@@ -128,6 +157,11 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
     return;
 
   p->perf_page_overflows++;
+  // The renderer places the first line of a screen (InitPen) with the font
+  // size in effect at that point of the buffer: the base size on a new page
+  // (before the restored style markers are applied), otherwise the size
+  // emitted so far. Use the same height here.
+  int top_line_height = 0;
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
@@ -137,16 +171,31 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
     p->pagecount++;
 
     parse_reset_page_buffer(p);
+    top_line_height = EmittedLineHeight(p);
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
     book_xml_inline_state::RestoreParsedInlineLinkMarker(p);
     p->screen = 0;
   } else {
+    // The renderer moves to the second screen at the line break that ran out
+    // of room, if that break already had no room by its (unguarded) margin,
+    // and starts the screen with the font size in effect at that break.
+    // Otherwise it moves at the screen-break marker appended below.
+    const bool renderer_breaks_at_newline =
+        p->buflen > 0 && p->buf[p->buflen - 1] != TEXT_SCREEN_BREAK &&
+        text_render_layout_utils::CurrentLineBeyondReadingScreen(
+            p->pen.y, maxHeight, metrics.bottom_margin);
+    top_line_height =
+        renderer_breaks_at_newline
+            ? LineHeightForEmittedSize(p,
+                                       (int)p->emitted_font_size_px_at_newline)
+            : EmittedLineHeight(p);
     AppendScreenBreakIfNeeded(p);
     p->screen = 1;
   }
+  (void)lineheight;
 
   p->pen.x = ts->margin.left;
-  p->pen.y = ts->margin.top + lineheight;
+  p->pen.y = ts->margin.top + top_line_height;
   p->linebegan = false;
   p->current_screen_has_drawable_content = false;
   // Pending spacing accumulated before the overflow is no longer relevant;
@@ -162,10 +211,13 @@ void AdvanceParsedScreen(parsedata_t *p) {
 
   Text *ts = p->ts;
 
+  // See AdvanceParsedPageOnOverflow: match the renderer's InitPen height.
+  int top_line_height = 0;
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
     parse_reset_page_buffer(p);
+    top_line_height = EmittedLineHeight(p);
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
     book_xml_inline_state::RestoreParsedInlineLinkMarker(p);
     p->screen = 0;
@@ -173,13 +225,14 @@ void AdvanceParsedScreen(parsedata_t *p) {
     // Important: parser state alone is not enough. The page renderer must also
     // see a marker in the buffer so it switches from the first reading screen
     // to the second one at the same point.
+    top_line_height = EmittedLineHeight(p);
     AppendScreenBreakIfNeeded(p);
     p->screen = 1;
   }
 
   p->current_screen_has_drawable_content = false;
   p->pen.x = ts->margin.left;
-  p->pen.y = ts->margin.top + ts->GetHeight();
+  p->pen.y = ts->margin.top + top_line_height;
   p->linebegan = false;
 }
 
@@ -357,7 +410,8 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   }
 
   Text *ts = p->ts;
-  const int lh = ts->GetHeight();
+  // Spacing lines are drawn at the font size already emitted to the page.
+  const int lh = EmittedLineHeight(p);
   const int ls = ts->linespacing;
   const int line_step = lh + (ls > 0 ? ls : 0);
   if (line_step <= 0) {

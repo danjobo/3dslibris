@@ -56,6 +56,8 @@ class Page {
 	//! Word boxes from the last Draw; only filled while the book has word
 	//! capture enabled (reader selection mode).
 	std::vector<text_selection_utils::WordBox> rendered_words_;
+	//! Visible characters the last Draw could not fit on screen (0 normally).
+	int last_draw_dropped_chars_;
 	mutable int cached_inline_link_count_;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
@@ -87,6 +89,7 @@ class Page {
 	const std::vector<text_selection_utils::WordBox> &GetRenderedWords() const {
 		return rendered_words_;
 	}
+	int GetLastDrawDroppedChars() const { return last_draw_dropped_chars_; }
 	size_t GetInlineLinkCount() const;
 	//	void Draw();
 	void Draw(Text *ts);
