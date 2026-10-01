@@ -87,8 +87,11 @@ Highlights & notes:
 - They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
   font size and layout changes and clearing the cache
 
-Syncing with another 3DS (Wi-Fi):
-- Both consoles need 3dslibris and the same Wi-Fi network
+Syncing with another 3DS (Wi-Fi or local wireless):
+- Both consoles need 3dslibris and the same connection type. "connection"
+  on the sync screen switches between Wi-Fi (same network) and local
+  wireless (no router needed; keep the consoles close and wireless
+  turned on). Local wireless is slower for copying books
 - On one console: GENERAL settings > sync with another 3DS > host a sync.
   It shows a 4-digit pairing code
 - On the other: the same screen > join a sync, then enter that code

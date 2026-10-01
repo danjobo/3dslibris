@@ -12,7 +12,8 @@
 // Two in-memory transports wired to each other.
 class PipeTransport : public SyncTransport {
 public:
-  PipeTransport() : peer_(NULL), state_(kConnected), max_queued_(0) {}
+  PipeTransport()
+      : peer_(NULL), state_(kConnected), max_queued_(0), unacked_(false) {}
   void Connect(PipeTransport *peer) { peer_ = peer; }
   void Poll(uint64_t) override {
     if (peer_ && state_ == kConnected && !outbox_.empty()) {
@@ -26,7 +27,8 @@ public:
     if (outbox_.size() > max_queued_)
       max_queued_ = outbox_.size();
   }
-  bool SendQueueEmpty() const override { return outbox_.empty(); }
+  // unacked_: bytes went out but the other side never confirmed them.
+  bool SendQueueEmpty() const override { return outbox_.empty() && !unacked_; }
   size_t QueuedBytes() const override { return outbox_.size(); }
   std::string TakeReceived() override {
     std::string out;
@@ -42,6 +44,7 @@ public:
   std::string outbox_;
   std::string inbox_;
   size_t max_queued_;
+  bool unacked_;
 };
 
 // Books by sync id, read from memory.

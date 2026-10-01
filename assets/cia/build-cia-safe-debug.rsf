@@ -153,6 +153,7 @@ AccessControlInfo:
    - ndm:u
    - ptm:u
    - soc:U # sockets (Wi-Fi sync)
+   - nwm::UDS # local wireless sync
 
 SystemControlInfo:
   SaveDataSize            : 0KB

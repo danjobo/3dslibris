@@ -305,6 +305,44 @@ void TestDisconnectFails() {
   test::ExpectTrue("disconnect fails", a.phase() == SyncSession::kFailed);
 }
 
+void TestPeerHangsUpAfterBothDone() {
+  // The other console finished and closed before acknowledging our DONE.
+  sync_manifest::Manifest m;
+  Pair p;
+  SyncSession a("1234", 0xA, "A", m, &p.ta);
+  SyncSession b("1234", 0xB, "B", m, &p.tb);
+  p.ta.unacked_ = true;
+  for (uint64_t now = 1; now < 50; now++) {
+    a.Poll(now);
+    b.Poll(now);
+    if (a.phase() == SyncSession::kChoosing)
+      a.SkipBooks();
+    if (b.phase() == SyncSession::kChoosing)
+      b.SkipBooks();
+  }
+  test::ExpectTrue("b done", b.phase() == SyncSession::kDone);
+  test::ExpectTrue("a waits for its ack", a.phase() == SyncSession::kFinishing);
+  p.ta.state_ = SyncTransport::kClosed;
+  a.Poll(60);
+  test::ExpectTrue("a done, not failed", a.phase() == SyncSession::kDone);
+}
+
+void TestHangUpBeforeDoneFails() {
+  sync_manifest::Manifest m;
+  Pair p;
+  SyncSession a("1234", 0xA, "A", m, &p.ta);
+  SyncSession b("1234", 0xB, "B", m, &p.tb);
+  for (uint64_t now = 1; now < 50; now++) {
+    a.Poll(now);
+    b.Poll(now);
+    if (b.phase() == SyncSession::kChoosing)
+      b.SkipBooks(); // a never chooses
+  }
+  p.ta.state_ = SyncTransport::kClosed;
+  a.Poll(60);
+  test::ExpectTrue("a failed", a.phase() == SyncSession::kFailed);
+}
+
 void TestTimeout() {
   sync_manifest::Manifest m;
   PipeTransport ta, silent;
@@ -361,6 +399,8 @@ int main() {
   TestSameConsoleIdFailsBothSidesQuickly();
   TestVersionMismatchExplained();
   TestDisconnectFails();
+  TestPeerHangsUpAfterBothDone();
+  TestHangUpBeforeDoneFails();
   TestTimeout();
   TestCancelDuringCopyKeepsPartial();
   return 0;

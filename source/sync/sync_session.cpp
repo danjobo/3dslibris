@@ -204,6 +204,10 @@ void SyncSession::PumpServing() {
   }
 }
 
+bool SyncSession::BothFinished() const {
+  return done_sent_ && done_received_ && !serving_ && serve_queue_.empty();
+}
+
 void SyncSession::Poll(uint64_t now_ms) {
   if (!transport_ || phase_ == kDone || phase_ == kFailed)
     return;
@@ -212,6 +216,14 @@ void SyncSession::Poll(uint64_t now_ms) {
     last_progress_ms_ = now_ms;
 
   const SyncTransport::State state = transport_->GetState();
+  if (state == SyncTransport::kFailed || state == SyncTransport::kClosed) {
+    // Both sides said DONE, so nothing is missing; only the acknowledgement
+    // of our DONE may not have arrived before the other console hung up.
+    if (BothFinished()) {
+      phase_ = kDone;
+      return;
+    }
+  }
   if (state == SyncTransport::kFailed) {
     Fail(transport_->Error().empty() ? "Connection lost"
                                      : transport_->Error());
@@ -265,8 +277,7 @@ void SyncSession::Poll(uint64_t now_ms) {
   // Flush what was just queued.
   transport_->Poll(now_ms);
 
-  if (done_sent_ && done_received_ && !serving_ && serve_queue_.empty() &&
-      transport_->SendQueueEmpty()) {
+  if (BothFinished() && transport_->SendQueueEmpty()) {
     phase_ = kDone;
     return;
   }

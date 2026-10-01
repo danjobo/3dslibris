@@ -128,6 +128,7 @@ public:
   int books_sent() const { return books_sent_; }
 
 private:
+  bool BothFinished() const;
   void Fail(const std::string &message);
   void FailAndTell(const char *reason);
   void HandleFrame(const sync_protocol::Frame &frame);

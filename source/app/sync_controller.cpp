@@ -24,6 +24,7 @@
 #include "shared/console_id.h"
 #include "shared/path_constants.h"
 #include "shared/utf8_utils.h"
+#include "sync/uds_transport.h"
 #include "sync/wifi_transport.h"
 #include "ui/button.h"
 #include "ui/screen_layout_constants.h"
@@ -32,7 +33,8 @@
 namespace {
 
 static const u32 kSocBufferSize = 0x100000;
-static const int kMenuOptionCount = 2;
+// host, join, connection type
+static const int kMenuOptionCount = 3;
 static const int kMenuButtonX = 5;
 static const int kMenuButtonY0 = 70;
 static const int kMenuButtonStride = 46;
@@ -45,8 +47,9 @@ static const int kPickListY = 64;
 static const int kPickHintsY = 252;
 // Redraw the copy progress at most this often (drawing costs copy time).
 static const uint64_t kProgressRedrawMs = 250;
-// Rough Wi-Fi copy speed on Old 3DS, for the time estimate.
-static const uint64_t kEstimateBytesPerSec = 400 * 1024;
+// Rough copy speeds on Old 3DS, for the time estimate.
+static const uint64_t kWifiBytesPerSec = 400 * 1024;
+static const uint64_t kLocalBytesPerSec = 100 * 1024;
 
 void LayoutMenuButton(Button *button, int index) {
   button->Init();
@@ -183,7 +186,7 @@ SyncController::SyncController(App &app)
       results_applied_(false), received_saved_(false), last_draw_ms_(0),
       last_books_sent_(0), changed_books_(0), records_added_(0),
       records_updated_(0), positions_moved_(0), pick_cursor_(0), pick_top_(0),
-      soc_buffer_(NULL), soc_ready_(false) {}
+      local_wireless_(false), soc_buffer_(NULL), soc_ready_(false) {}
 
 SyncController::~SyncController() {
   EndSession();
@@ -325,21 +328,39 @@ void SyncController::StartSession() {
   changed_books_ = records_added_ = records_updated_ = positions_moved_ = 0;
 }
 
-void SyncController::StartHost() {
+bool SyncController::OpenTransport(bool host) {
+  if (local_wireless_) {
+    transport_.reset(host ? UdsTransport::CreateHost(DeviceName(),
+                                                     pairing_code_)
+                          : UdsTransport::CreateJoin(DeviceName(),
+                                                     pairing_code_));
+    if (transport_->GetState() == SyncTransport::kFailed) {
+      ShowError(transport_->Error());
+      return false;
+    }
+    return true;
+  }
   uint32_t ip = 0;
   if (!StartNetwork(&ip)) {
-    ShowError("Not connected to Wi-Fi. Connect in System Settings, then "
-              "try again.");
-    return;
+    ShowError("Not connected to Wi-Fi. Connect in System Settings, or "
+              "choose local wireless, then try again.");
+    return false;
   }
+  WifiTransport::Options options;
+  options.local_ip = ip;
+  transport_.reset(host ? WifiTransport::CreateHost(DeviceName(), options)
+                        : WifiTransport::CreateJoin(DeviceName(), options));
+  return true;
+}
+
+void SyncController::StartHost() {
   char code[8];
   snprintf(code, sizeof(code), "%04u",
            (unsigned)(console_id::Generate(osGetTime() ^ svcGetSystemTick()) %
                       10000u));
   pairing_code_ = code;
-  WifiTransport::Options options;
-  options.local_ip = ip;
-  transport_.reset(WifiTransport::CreateHost(DeviceName(), options));
+  if (!OpenTransport(true))
+    return;
   StartSession();
   screen_ = kHosting;
   dirty_ = true;
@@ -353,16 +374,9 @@ void SyncController::StartJoin() {
   dirty_ = true;
   if (!entered)
     return;
-  uint32_t ip = 0;
-  if (!StartNetwork(&ip)) {
-    ShowError("Not connected to Wi-Fi. Connect in System Settings, then "
-              "try again.");
-    return;
-  }
   pairing_code_ = code;
-  WifiTransport::Options options;
-  options.local_ip = ip;
-  transport_.reset(WifiTransport::CreateJoin(DeviceName(), options));
+  if (!OpenTransport(false))
+    return;
   StartSession();
   screen_ = kJoining;
 }
@@ -614,10 +628,14 @@ void SyncController::RunFrame(const FrameInput &input) {
           chosen = i;
       }
     }
-    if (chosen == 0)
+    if (chosen == 0) {
       StartHost();
-    else if (chosen == 1)
+    } else if (chosen == 1) {
       StartJoin();
+    } else if (chosen == 2) {
+      local_wireless_ = !local_wireless_;
+      dirty_ = true;
+    }
     break;
   }
   case kHosting:
@@ -704,7 +722,10 @@ void SyncController::DrawPicker(int y) {
   if (chosen > 0)
     snprintf(line, sizeof(line), "%d of %d: %s (~%s)", chosen,
              (int)missing_.size(), FormatSize(chosen_bytes).c_str(),
-             FormatDuration(chosen_bytes / kEstimateBytesPerSec).c_str());
+             FormatDuration(chosen_bytes / (local_wireless_
+                                                ? kLocalBytesPerSec
+                                                : kWifiBytesPerSec))
+                 .c_str());
   else
     snprintf(line, sizeof(line), "%d book%s only on the other 3DS",
              (int)missing_.size(), missing_.size() == 1 ? "" : "s");
@@ -806,7 +827,10 @@ void SyncController::Draw() {
   std::vector<std::string> lines;
   switch (screen_) {
   case kMenu:
-    lines.push_back("Both consoles: same Wi-Fi, this screen open.");
+    lines.push_back(local_wireless_
+                        ? "Local wireless: no router needed. Keep the "
+                          "consoles close, with this screen open."
+                        : "Both consoles: same Wi-Fi, this screen open.");
     break;
   case kHosting:
     lines.push_back("This 3DS: " + DeviceName());
@@ -821,8 +845,13 @@ void SyncController::Draw() {
     break;
   case kJoining:
     lines.push_back("This 3DS: " + DeviceName());
-    lines.push_back("Looking for the host on this Wi-Fi");
-    lines.push_back("network...");
+    if (local_wireless_) {
+      lines.push_back("Looking for a host nearby with");
+      lines.push_back("code " + pairing_code_ + "...");
+    } else {
+      lines.push_back("Looking for the host on this Wi-Fi");
+      lines.push_back("network...");
+    }
     lines.push_back("");
     lines.push_back("B: cancel");
     break;
@@ -895,15 +924,17 @@ void SyncController::Draw() {
   }
 
   if (screen_ == kMenu) {
-    static const char *kLabels[kMenuOptionCount] = {"host a sync",
-                                                    "join a sync"};
-    static const char *kHints[kMenuOptionCount] = {
-        "show a pairing code here >", "enter the host's code >"};
+    const char *labels[kMenuOptionCount] = {
+        "host a sync", "join a sync",
+        local_wireless_ ? "connection: local wireless" : "connection: Wi-Fi"};
+    const char *hints[kMenuOptionCount] = {"show a pairing code here >",
+                                           "enter the host's code >",
+                                           "both consoles must match >"};
     for (int i = 0; i < kMenuOptionCount; i++) {
       Button button(ts);
       LayoutMenuButton(&button, i);
-      button.SetLabel1(kLabels[i]);
-      button.SetLabel2(kHints[i]);
+      button.SetLabel1(labels[i]);
+      button.SetLabel2(hints[i]);
       button.Draw(ts->screenright, i == menu_index_);
     }
   }

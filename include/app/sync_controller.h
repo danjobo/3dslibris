@@ -2,10 +2,10 @@
     3dslibris - sync_controller.h
 
     "Sync with another 3DS" screen (AppMode::Sync). One console hosts and
-    shows a pairing code; the other joins and types the code. Over Wi-Fi the
-    two exchange their whole library's per-book state (progress, bookmarks,
-    highlights and notes), merge it (see sync/sync_session.h) and apply the
-    result. Each console can then pick books only the other one has and copy
+    shows a pairing code; the other joins and types the code. Over Wi-Fi,
+    or over local wireless when there is no router, the two exchange their
+    whole library's per-book state (progress, bookmarks, highlights and
+    notes), merge it (see sync/sync_session.h) and apply the result. Each console can then pick books only the other one has and copy
     them. Everything runs on the main loop without blocking.
 */
 
@@ -53,6 +53,8 @@ private:
   };
 
   bool StartNetwork(uint32_t *local_ip);
+  // Wi-Fi or local wireless, per local_wireless_; false after ShowError.
+  bool OpenTransport(bool host);
   void StopNetwork();
   void StartHost();
   void StartJoin();
@@ -103,6 +105,8 @@ private:
   int pick_cursor_;
   int pick_top_;
 
+  // Connection type chosen on the menu (kept while the app runs).
+  bool local_wireless_;
   uint32_t *soc_buffer_;
   bool soc_ready_;
 };
