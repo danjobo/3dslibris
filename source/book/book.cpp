@@ -56,10 +56,6 @@ static bool HasExtCaseInsensitive(const std::string &name, const char *ext) {
   return true;
 }
 
-static const u32 kEtaSampleMinMs = 600;
-static const u32 kEtaSampleMaxMs = 240000;
-static const float kEtaEmaAlpha = 0.20f;
-
 static int ClampPositionToPageCount(int pos, u16 page_count) {
   // During startup restore we can receive a valid saved position before pages
   // are parsed. Keep it so reopen can land on the expected page after parse.
@@ -70,19 +66,6 @@ static int ClampPositionToPageCount(int pos, u16 page_count) {
   if (pos >= (int)page_count)
     return (int)page_count - 1;
   return pos;
-}
-
-static int RemainingMinutesFromMsPerPage(int remaining_pages,
-                                         float ms_per_page) {
-  if (remaining_pages <= 0)
-    return 0;
-  if (ms_per_page <= 0.0f)
-    return -1;
-  const float total_ms = (float)remaining_pages * ms_per_page;
-  int minutes = (int)((total_ms + 59999.0f) / 60000.0f);
-  if (minutes < 1)
-    minutes = 1;
-  return minutes;
 }
 
 } // namespace
@@ -97,9 +80,6 @@ Book::Book(const BookContext &c) : ctx(c) {
 
   // Position state / basic rendering
   position = 0;
-  eta_ms_per_page_ = 0.0f;
-  eta_last_adjacent_turn_ms_ = 0;
-  eta_samples_ = 0;
   last_opened_time = 0;
   coverPixels = nullptr;
   coverWidth = 0;
@@ -706,40 +686,18 @@ void Book::SetPosition(int pos) {
   const int next = ClampPositionToPageCount(pos, GetPageCount());
   position = next;
 
-  const int delta = next - prev;
-  const int abs_delta = delta >= 0 ? delta : -delta;
-  if (abs_delta > 1) {
-    eta_last_adjacent_turn_ms_ = 0;
-    return;
-  }
-  if (abs_delta != 1)
-    return;
-
-  const u32 now_ms = (u32)osGetTime();
-  if (eta_last_adjacent_turn_ms_ != 0 && now_ms > eta_last_adjacent_turn_ms_) {
-    const u32 elapsed_ms = now_ms - eta_last_adjacent_turn_ms_;
-    if (elapsed_ms >= kEtaSampleMinMs && elapsed_ms <= kEtaSampleMaxMs) {
-      const float sample = (float)elapsed_ms;
-      if (eta_samples_ == 0)
-        eta_ms_per_page_ = sample;
-      else
-        eta_ms_per_page_ = eta_ms_per_page_ * (1.0f - kEtaEmaAlpha) +
-                           sample * kEtaEmaAlpha;
-      if (eta_samples_ < 0xFFFF)
-        eta_samples_++;
-    }
-  }
-  eta_last_adjacent_turn_ms_ = now_ms;
+  if (next != prev)
+    reading_pace_utils::OnPositionChange(&reading_pace_, prev, next,
+                                         (int)GetPageCount(),
+                                         (u32)osGetTime());
 }
 
 void Book::ResetReadingPaceEstimate() {
-  eta_ms_per_page_ = 0.0f;
-  eta_last_adjacent_turn_ms_ = 0;
-  eta_samples_ = 0;
+  reading_pace_ = reading_pace_utils::PaceState();
 }
 
 bool Book::HasReadingPaceEstimate() const {
-  return eta_samples_ >= 3 && eta_ms_per_page_ > 0.0f;
+  return reading_pace_utils::HasEstimate(reading_pace_);
 }
 
 int Book::EstimateRemainingBookMinutes() const {
@@ -756,7 +714,8 @@ int Book::EstimateRemainingBookMinutes() const {
     pos = 0;
   if (pos >= page_count)
     pos = page_count - 1;
-  return RemainingMinutesFromMsPerPage(page_count - 1 - pos, eta_ms_per_page_);
+  return reading_pace_utils::RemainingMinutes(reading_pace_,
+                                             page_count - 1 - pos);
 }
 
 int Book::EstimateRemainingChapterMinutes() const {
@@ -787,7 +746,8 @@ int Book::EstimateRemainingChapterMinutes() const {
   if (chapter_end < pos)
     chapter_end = pos;
 
-  return RemainingMinutesFromMsPerPage(chapter_end - pos, eta_ms_per_page_);
+  return reading_pace_utils::RemainingMinutes(reading_pace_,
+                                             chapter_end - pos);
 }
 
 Page *Book::AppendPage() {

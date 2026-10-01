@@ -18,6 +18,7 @@
 #include "book/annotation_text_utils.h"
 #include "book/book_context.h"
 #include "book/inline_image_layout.h"
+#include "book/reading_pace_utils.h"
 #include "shared/app_flow_utils.h"
 #include <3ds.h>
 #include <list>
@@ -106,9 +107,7 @@ private:
   bool browser_display_name_cached;
   bool browser_folder_entry;
   int position;             //! as page index.
-  float eta_ms_per_page_;
-  u32 eta_last_adjacent_turn_ms_;
-  u16 eta_samples_;
+  reading_pace_utils::PaceState reading_pace_; //! Time-remaining estimate.
   uint32_t last_opened_time; //! Unix timestamp of last open; 0 if never opened.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
