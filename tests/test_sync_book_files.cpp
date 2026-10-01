@@ -54,6 +54,10 @@ sync_manifest::BookEntry Entry(const char *name, uint64_t size) {
   return e;
 }
 
+std::string Part(const std::string &dir, const char *name, uint64_t size) {
+  return dir + "/" + sync_book_files::PartFileName(Entry(name, size));
+}
+
 void TestScanLibrary() {
   const std::string lib = g_root + "/lib";
   const std::string other = g_root + "/romfs";
@@ -97,6 +101,27 @@ void TestSafeNames() {
   test::ExpectTrue("part", !sync_book_files::IsSafeFileName("x.epub.part"));
   test::ExpectTrue("colon", !sync_book_files::IsSafeFileName("sdmc:x.epub"));
   test::ExpectTrue("empty", !sync_book_files::IsSafeFileName(""));
+  // A real Anna's Archive name (over 200 bytes) must be accepted.
+  const std::string long_name =
+      "The Tell Tale Heart -- Washington Irving; James Fenimore Cooper; "
+      "Nathaniel -- HarperPerennial classics, Toronto, Ontario, 2014 -- "
+      "Penguin Books, -- isbn13 9780141397276 -- "
+      "a4ec9bb67ddeddc43e8f8a4d48a5add0 -- Anna\xE2\x80\x99s Archive.epub";
+  test::ExpectTrue("long real name",
+                   long_name.size() > 200 &&
+                       sync_book_files::IsSafeFileName(long_name));
+  test::ExpectTrue("255 characters ok",
+                   sync_book_files::IsSafeFileName(std::string(250, 'a') +
+                                                   ".epub"));
+  test::ExpectTrue("256 too long",
+                   !sync_book_files::IsSafeFileName(std::string(251, 'a') +
+                                                    ".epub"));
+  // Multi-byte characters count once each, as on the SD card.
+  std::string accents;
+  for (int i = 0; i < 120; i++)
+    accents += "\xC3\xA9";
+  test::ExpectTrue("accented name ok",
+                   sync_book_files::IsSafeFileName(accents + ".epub"));
 }
 
 void TestSourceReadsFromOffset() {
@@ -129,14 +154,14 @@ void TestSinkCopiesResumesAndRefuses() {
   test::ExpectEq("from the start", (int)offset, 0);
   test::ExpectTrue("writes", sink.Write("abcd", 4));
   sink.Finish(false);
-  test::ExpectTrue("partial kept", ReadFile(dir + "/n.epub.part") == "abcd");
+  test::ExpectTrue("partial kept", ReadFile(Part(dir, "n.epub", 8)) == "abcd");
   test::ExpectTrue("not shown as a book yet", !Exists(dir + "/n.epub"));
   test::ExpectTrue("resumes", sink.Begin(Entry("n.epub", 8), &offset, &error));
   test::ExpectEq("from the partial copy", (int)offset, 4);
   sink.Write("efgh", 4);
   test::ExpectTrue("finishes", sink.Finish(true));
   test::ExpectTrue("renamed into place", ReadFile(dir + "/n.epub") == "abcdefgh");
-  test::ExpectTrue("part gone", !Exists(dir + "/n.epub.part"));
+  test::ExpectTrue("part gone", !Exists(Part(dir, "n.epub", 8)));
 
   // Same name, different file.
   test::ExpectTrue("name clash refused",
@@ -145,7 +170,7 @@ void TestSinkCopiesResumesAndRefuses() {
                    error.find("already here") != std::string::npos);
 
   // Leftovers bigger than the book belong to some other file.
-  WriteFile(dir + "/m.epub.part", "0123456789");
+  WriteFile(Part(dir, "m.epub", 4), "0123456789");
   test::ExpectTrue("begins over junk",
                    sink.Begin(Entry("m.epub", 4), &offset, &error));
   test::ExpectEq("starts over", (int)offset, 0);
@@ -158,7 +183,7 @@ void TestSinkCopiesResumesAndRefuses() {
                                         &error));
   sink.Write("ab", 2);
   test::ExpectTrue("size mismatch fails", !sink.Finish(true));
-  test::ExpectTrue("damaged part removed", !Exists(dir + "/short.epub.part"));
+  test::ExpectTrue("damaged part removed", !Exists(Part(dir, "short.epub", 5)));
   test::ExpectTrue("not added", !Exists(dir + "/short.epub"));
 
   // No space.

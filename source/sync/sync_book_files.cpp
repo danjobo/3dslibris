@@ -13,12 +13,15 @@
 #include <unistd.h>
 
 #include "sync/sync_merge.h"
+#include "sync/sync_protocol.h"
 
 namespace sync_book_files {
 
 namespace {
 
 const int kMaxDepth = 8;
+// FAT long file names hold up to 255 UTF-16 code units.
+const size_t kMaxNameUnits = 255;
 const char kPartSuffix[] = ".part";
 
 bool EndsWith(const std::string &s, const char *suffix) {
@@ -65,6 +68,17 @@ void ScanDir(const std::string &dir, int depth, BookFilter accept,
     ScanDir(subdirs[i], depth + 1, accept, normalize, seen, out);
 }
 
+size_t Utf16Units(const std::string &s) {
+  size_t units = 0;
+  for (size_t i = 0; i < s.size(); i++) {
+    const unsigned char c = (unsigned char)s[i];
+    if ((c & 0xC0) == 0x80)
+      continue; // continuation byte
+    units += c >= 0xF0 ? 2 : 1; // 4-byte sequences need a surrogate pair
+  }
+  return units;
+}
+
 bool FileSize(const std::string &path, uint64_t *size) {
   struct stat st;
   if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
@@ -88,8 +102,19 @@ std::vector<LocalBook> ScanLibrary(const std::vector<std::string> &roots,
   return out;
 }
 
+std::string PartFileName(const sync_manifest::BookEntry &book) {
+  // Short and fixed-length, so a long book name can't make it too long;
+  // hidden, so the library never lists it.
+  const std::string id = book.SyncId();
+  char name[32];
+  snprintf(name, sizeof(name), ".sync-%08x.part",
+           (unsigned)sync_protocol::Crc32(id.data(), id.size()));
+  return name;
+}
+
 bool IsSafeFileName(const std::string &name) {
-  if (name.empty() || name.size() > 200 || name[0] == '.' || name[0] == ' ' ||
+  if (name.empty() || Utf16Units(name) > kMaxNameUnits || name[0] == '.' ||
+      name[0] == ' ' ||
       EndsWith(name, kPartSuffix) || EndsWith(name, ".") ||
       EndsWith(name, " "))
     return false;
@@ -156,7 +181,7 @@ bool FileBookSink::Begin(const sync_manifest::BookEntry &book,
     return false;
   }
   final_path_ = dest_dir_ + "/" + book.file_name;
-  part_path_ = final_path_ + ".part";
+  part_path_ = dest_dir_ + "/" + sync_book_files::PartFileName(book);
   expected_size_ = book.file_size;
   uint64_t existing = 0;
   if (sync_book_files::FileSize(final_path_, &existing)) {

@@ -5,8 +5,9 @@
     (all subfolders), reading them for the other console, and saving books
     received from it. Plain POSIX / stdio, so it is host-tested.
 
-    A received book is written to "<name>.part" next to where it will go and
-    renamed once complete; an interrupted copy resumes from the .part file.
+    A received book is written to a hidden ".sync-<crc>.part" file next to
+    where it will go and renamed once complete; an interrupted copy resumes
+    from that file.
 */
 
 #pragma once
@@ -40,6 +41,9 @@ typedef std::string (*NameFn)(const std::string &raw_name);
 // same file (name and size) is in several places the first one wins.
 std::vector<LocalBook> ScanLibrary(const std::vector<std::string> &roots,
                                    BookFilter accept, NameFn normalize = NULL);
+
+// Name of the partial file a book is received into (in the same folder).
+std::string PartFileName(const sync_manifest::BookEntry &book);
 
 // A received file name is used as-is on this SD card: no folders, no
 // hidden or partial files, nothing a FAT file system rejects.
