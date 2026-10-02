@@ -1,0 +1,9 @@
+StarDict's dict ifo file
+version=2.4.2
+wordcount=152090
+idxfilesize=3099538
+bookname=WordNet
+author=Princeton University
+website=https://wordnet.princeton.edu/
+description=WordNet 3.0 (c) 2006 Princeton University. See LICENSE.txt.
+sametypesequence=m
