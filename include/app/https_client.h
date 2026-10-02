@@ -39,7 +39,7 @@ private:
 
 struct Response {
   long status;        // HTTP status, 0 if no response
-  std::string body;   // first kMaxBodyBytes of it
+  std::string body;   // first max_body_bytes of it
   std::string error;  // set when the request failed (no HTTP status)
   Response() : status(0) {}
 };
@@ -50,7 +50,8 @@ static const size_t kMaxBodyBytes = 64 * 1024;
 bool Request(Session &session, const std::string &method,
              const std::string &url,
              const std::vector<std::string> &headers, const std::string &body,
-             Response *out, long timeout_seconds = 30);
+             Response *out, long timeout_seconds = 30,
+             size_t max_body_bytes = kMaxBodyBytes);
 
 // The CA bundle in use (SD copy first, then the one built into the app).
 std::string CaBundlePath();

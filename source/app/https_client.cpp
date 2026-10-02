@@ -25,11 +25,17 @@ namespace {
 const u32 kSocBufferSize = 0x100000;
 const char kRomfsCaBundle[] = "romfs:/3ds/3dslibris/resources/cacert.pem";
 
+struct BodySink {
+  std::string *body;
+  size_t max_bytes;
+};
+
 size_t CollectBody(char *data, size_t size, size_t count, void *user) {
-  std::string *body = static_cast<std::string *>(user);
+  BodySink *sink = static_cast<BodySink *>(user);
   const size_t n = size * count;
-  if (body->size() < kMaxBodyBytes)
-    body->append(data, std::min(n, kMaxBodyBytes - body->size()));
+  if (sink->body->size() < sink->max_bytes)
+    sink->body->append(data,
+                       std::min(n, sink->max_bytes - sink->body->size()));
   return n; // keep reading (and discard) past the cap
 }
 
@@ -94,8 +100,10 @@ Session::~Session() {
 
 bool Request(Session &session, const std::string &method,
              const std::string &url, const std::vector<std::string> &headers,
-             const std::string &body, Response *out, long timeout_seconds) {
+             const std::string &body, Response *out, long timeout_seconds,
+             size_t max_body_bytes) {
   *out = Response();
+  BodySink sink = {&out->body, max_body_bytes};
   CURL *curl = (CURL *)session.handle();
   if (!session.ok() || !curl) {
     out->error = session.error().empty() ? "Not connected" : session.error();
@@ -119,7 +127,7 @@ bool Request(Session &session, const std::string &method,
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout_seconds);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, error_buf);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &CollectBody);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out->body);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
   if (header_list)
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
   if (method == "POST") {

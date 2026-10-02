@@ -1,7 +1,8 @@
 /*
     3dslibris - text_selection_utils.h
 
-    Pure helpers for the reader's text selection mode (highlights/notes):
+    Pure helpers for the reader's text selection mode (highlights/notes,
+    and word lookup, which picks a single word):
     word boxes recorded while a page is drawn, cursor movement between them,
     touch hit-testing, and the selected buffer range.
 */
@@ -9,6 +10,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string>
 #include <vector>
 
 #include "reader/inline_link_utils.h"
@@ -28,6 +30,7 @@ enum class SelectionPopup : uint8_t {
   None = 0,
   NewSelection,      // Highlight / Highlight + note / Color / Cancel
   ExistingHighlight, // Edit note / Color / Delete / Cancel
+  WordLookup,        // Dictionary / Look up online / [Follow link] / Cancel
 };
 
 // Direction on the page, as the reader sees it.
@@ -35,6 +38,8 @@ enum class ScreenDirection : uint8_t { None = 0, Left, Right, Up, Down };
 
 struct TextSelectionState {
   bool active = false;
+  // Word lookup (entered by holding Y): one word, no highlight range.
+  bool lookup = false;
   int anchor = -1; // word index where the selection started, -1 if unset
   int cursor = 0;  // word index under the cursor
   bool touch_dragging = false;
@@ -53,6 +58,10 @@ struct TextSelectionState {
   // the selection crosses a page break.
   int popup_page = -1;
   uint8_t popup_color = 0;
+  // Word lookup: the picked word, and the inline link it is part of (index
+  // in the page's rendered links, -1 if none).
+  std::string popup_word;
+  int popup_link = -1;
 
   // A selection carried over a page break: it started at carried_buf_begin
   // on carried_page; on the current page it covers word 0 to the cursor.
@@ -62,9 +71,13 @@ struct TextSelectionState {
   bool x_hold_armed = false;
   bool x_hold_consumed = false;
   uint64_t x_hold_started_ms = 0;
+  bool y_hold_armed = false;
+  bool y_hold_consumed = false;
+  uint64_t y_hold_started_ms = 0;
 
   void ResetSelection() {
     active = false;
+    lookup = false;
     anchor = -1;
     cursor = 0;
     touch_dragging = false;
@@ -78,6 +91,8 @@ struct TextSelectionState {
     popup_buf_end = -1;
     popup_page = -1;
     popup_color = 0;
+    popup_word.clear();
+    popup_link = -1;
     carried_page = -1;
     carried_buf_begin = -1;
   }

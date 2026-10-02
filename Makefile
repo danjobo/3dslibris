@@ -45,6 +45,7 @@ SOURCES		:=	source \
 			source/settings \
 			source/sync \
 			source/book \
+			source/dictionary \
 			source/formats/common \
 			source/formats/epub \
 			source/formats/fb2 \
@@ -339,6 +340,7 @@ stage-romfs:
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/book/" "$(ROMFS_RUNTIME_APPDIR)/book/"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font/" "$(ROMFS_RUNTIME_APPDIR)/font/"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources/" "$(ROMFS_RUNTIME_APPDIR)/resources/"
+	@if [ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/dict" ]; then rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/dict/" "$(ROMFS_RUNTIME_APPDIR)/dict/"; fi
 	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)/licenses"
 	@cp LICENSE "$(ROMFS_RUNTIME_APPDIR)/licenses/LICENSE.txt"
 	@cp THIRD_PARTY_NOTICES.md "$(ROMFS_RUNTIME_APPDIR)/licenses/THIRD_PARTY_NOTICES.md"

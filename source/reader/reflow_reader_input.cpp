@@ -5,8 +5,10 @@
     Summary:
     - Input handling for reflowable books (EPUB/FB2/MOBI/TXT etc.) in reading mode.
     - Extracted from reader/app_book.cpp HandleEventInBook reflowable branch.
-    - Inline link interaction helpers (EnterInlineLinkFocus, TryFollowTouchLink,
-      etc.) are private to this translation unit.
+    - Inline links are followed by touch, or from the word lookup popup
+      (hold Y on a word that is part of a link).
+    - Text selection (hold X: highlights and notes) and word lookup (hold
+      Y: dictionary and online definitions) share the word cursor below.
 */
 
 #include "reader/reflow_reader_input.h"
@@ -17,27 +19,31 @@
 #include <string>
 
 #include "app/app.h"
+#include "book/annotation_text_utils.h"
 #include "book/book.h"
 #include "book/highlight_color_utils.h"
 #include "book/page.h"
+#include "dictionary/dictionary_set.h"
+#include "dictionary/web_lookup.h"
+#include "dictionary/word_lookup_utils.h"
 #include "reader/book_page_nav.h"
 #include "reader/inline_link_utils.h"
 #include "reader/note_editor.h"
 #include "reader/page_repeat_utils.h"
 #include "reader/text_selection_utils.h"
+#include "reader/word_lookup_panel.h"
 #include "ui/button.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
 #include "shared/orientation_utils.h"
+#include "shared/path_constants.h"
 #include "ui/text.h"
 #include "ui/ui_button_skin.h"
 
 namespace {
 
-static const uint64_t kInlineLinkHoldThresholdMs = 350;
 static const uint64_t kPageRepeatInitialDelayMs = 400;
 static const uint64_t kPageRepeatIntervalMs = 150;
-static const int kInlineLinkSecondScreenYOffset = 420;
 static const int kTouchLinkMinHitPx = 12;
 static const int kTouchLinkPadPx = 4;
 
@@ -49,93 +55,6 @@ CurrentPageInlineLinks(Book *book) {
   if (!page)
     return NULL;
   return &page->GetRenderedInlineLinks();
-}
-
-static bool CurrentPageHasInlineLinks(Book *book) {
-  const std::vector<Page::InlineLinkRenderEntry> *links =
-      CurrentPageInlineLinks(book);
-  return links && !links->empty();
-}
-
-static void ExitInlineLinkFocus(App *app, Book *book) {
-  if (book)
-    book->ClearFocusedInlineLink();
-  if (app)
-    app->SetInlineLinkFocusActive(false);
-}
-
-static bool EnterInlineLinkFocus(App *app, Book *book, Text *ts) {
-  if (!app || !book || !ts)
-    return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
-      CurrentPageInlineLinks(book);
-  if (!links || links->empty())
-    return false;
-  int focus_index = book->GetFocusedInlineLinkIndex();
-  if (focus_index < 0 || focus_index >= (int)links->size())
-    focus_index = 0;
-  book->SetFocusedInlineLinkIndex(focus_index);
-  app->SetInlineLinkFocusActive(true);
-  book_nav::DrawPage(book, ts);
-  return true;
-}
-
-static size_t InlineLinkCountForPage(Book *book, int page_index) {
-  if (!book || book->IsFixedLayout() || page_index < 0 ||
-      page_index >= book->GetPageCount())
-    return 0;
-  Page *page = book->GetPage(page_index);
-  return page ? page->GetInlineLinkCount() : 0;
-}
-
-static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
-  if (!book || !ts || direction == 0 || book->IsFixedLayout())
-    return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
-      CurrentPageInlineLinks(book);
-  if (!links || links->empty())
-    return false;
-
-  int current_index = book->GetFocusedInlineLinkIndex();
-  if (current_index < 0 || current_index >= (int)links->size())
-    current_index = 0;
-
-  if (direction > 0 && current_index + 1 < (int)links->size()) {
-    book->SetFocusedInlineLinkIndex(current_index + 1);
-    book_nav::DrawPage(book, ts);
-    return true;
-  }
-  if (direction < 0 && current_index > 0) {
-    book->SetFocusedInlineLinkIndex(current_index - 1);
-    book_nav::DrawPage(book, ts);
-    return true;
-  }
-
-  const int page_count = (int)book->GetPageCount();
-  const int current_page = book->GetPosition();
-  if (direction > 0) {
-    for (int page_index = current_page + 1; page_index < page_count; ++page_index) {
-      const size_t link_count = InlineLinkCountForPage(book, page_index);
-      if (link_count == 0)
-        continue;
-      book->SetPosition(page_index);
-      book->SetFocusedInlineLinkIndex(0);
-      book_nav::DrawPage(book, ts);
-      return true;
-    }
-    return false;
-  }
-
-  for (int page_index = current_page - 1; page_index >= 0; --page_index) {
-    const size_t link_count = InlineLinkCountForPage(book, page_index);
-    if (link_count == 0)
-      continue;
-    book->SetPosition(page_index);
-    book->SetFocusedInlineLinkIndex((int)link_count - 1);
-    book_nav::DrawPage(book, ts);
-    return true;
-  }
-  return false;
 }
 
 static bool FollowFocusedInlineLink(Book *book, Text *ts) {
@@ -213,6 +132,10 @@ static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
 //
 // Hold X to enter. The D-pad moves a word cursor (touch drag also selects on
 // the touch screen); A marks the start, A again opens the action popup.
+//
+// Hold Y for word lookup: the same cursor picks one word, and A (or a tap)
+// opens Dictionary / Look up online / Follow link. Definitions show in a
+// scrolling panel on the touch screen.
 // ---------------------------------------------------------------------------
 
 using text_selection_utils::SelectionPopup;
@@ -221,7 +144,7 @@ using text_selection_utils::WordBox;
 
 static const uint64_t kSelectionHoldThresholdMs = 400;
 static const int kTouchWordPadPx = 6;
-static const int kPopupOptionCount = 4;
+static const int kMaxPopupOptions = 4;
 static const int kPopupButtonW = 220;
 static const int kPopupButtonH = 36;
 static const int kPopupButtonX = 10;
@@ -236,24 +159,55 @@ static const std::vector<WordBox> *CurrentPageWords(Book *book) {
   return page ? &page->GetRenderedWords() : NULL;
 }
 
-// The popup row that picks the highlight color.
+// The popup row that picks the highlight color, -1 if there is none.
 static int ColorOption(SelectionPopup popup) {
+  if (popup == SelectionPopup::WordLookup)
+    return -1;
   return popup == SelectionPopup::ExistingHighlight ? 1 : 2;
 }
 
-static std::string PopupLabel(SelectionPopup popup, int index,
-                              uint8_t color) {
-  static const char *kNew[kPopupOptionCount] = {"Highlight", "Highlight + note",
-                                                NULL, "Cancel"};
-  static const char *kExisting[kPopupOptionCount] = {
+enum class LookupAction : uint8_t { Dictionary, Online, FollowLink, Cancel };
+
+static int PopupOptionCount(const TextSelectionState &sel) {
+  if (sel.popup == SelectionPopup::WordLookup)
+    return sel.popup_link >= 0 ? 4 : 3;
+  return kMaxPopupOptions;
+}
+
+static LookupAction LookupActionAt(const TextSelectionState &sel, int index) {
+  if (index == 0)
+    return LookupAction::Dictionary;
+  if (index == 1)
+    return LookupAction::Online;
+  if (index == 2 && sel.popup_link >= 0)
+    return LookupAction::FollowLink;
+  return LookupAction::Cancel;
+}
+
+static std::string PopupLabel(const TextSelectionState &sel, int index) {
+  static const char *kNew[kMaxPopupOptions] = {"Highlight", "Highlight + note",
+                                               NULL, "Cancel"};
+  static const char *kExisting[kMaxPopupOptions] = {
       "Edit note", NULL, "Delete highlight", "Cancel"};
-  if (index < 0 || index >= kPopupOptionCount)
+  if (index < 0 || index >= PopupOptionCount(sel))
     return "";
-  if (index == ColorOption(popup))
-    return std::string("Color: ") + highlight_color_utils::Name(color) +
+  if (sel.popup == SelectionPopup::WordLookup) {
+    switch (LookupActionAt(sel, index)) {
+    case LookupAction::Dictionary:
+      return "Dictionary";
+    case LookupAction::Online:
+      return "Look up online";
+    case LookupAction::FollowLink:
+      return "Follow link";
+    default:
+      return "Cancel";
+    }
+  }
+  if (index == ColorOption(sel.popup))
+    return std::string("Color: ") + highlight_color_utils::Name(sel.popup_color) +
            "  < >";
-  return popup == SelectionPopup::ExistingHighlight ? kExisting[index]
-                                                    : kNew[index];
+  return sel.popup == SelectionPopup::ExistingHighlight ? kExisting[index]
+                                                        : kNew[index];
 }
 
 static void LayoutPopupButton(Button *button, int index) {
@@ -270,10 +224,26 @@ static void DrawSelectionPopup(App &app, Text *ts) {
   const TextSelectionState &sel = app.MutableTextSelection();
   if (sel.popup == SelectionPopup::None || !ts)
     return;
-  for (int i = 0; i < kPopupOptionCount; i++) {
+  if (sel.popup == SelectionPopup::WordLookup && !sel.popup_word.empty()) {
+    // The word being looked up, above the buttons.
+    const int saved_style = ts->GetStyle();
+    u16 *saved_screen = ts->GetScreen();
+    ts->SetScreen(ts->screenright);
+    ts->SetStyle(TEXT_STYLE_BROWSER);
+    const int x1 = kPopupButtonX + kPopupButtonW;
+    const int y1 = kPopupButtonY0 - 6;
+    const int y0 = y1 - (int)ts->GetHeight() - 10;
+    FillBufferRect(ts, ts->screenright, false, kPopupButtonX, y0, x1, y1,
+                   ts->GetBgColor());
+    ts->SetPen(kPopupButtonX + 6, (u16)(y1 - 6));
+    ts->PrintString(("\"" + sel.popup_word + "\"").c_str());
+    ts->SetStyle(saved_style);
+    ts->SetScreen(saved_screen);
+  }
+  for (int i = 0; i < PopupOptionCount(sel); i++) {
     Button button(ts);
     LayoutPopupButton(&button, i);
-    const std::string label = PopupLabel(sel.popup, i, sel.popup_color);
+    const std::string label = PopupLabel(sel, i);
     button.SetLabel1(label.c_str());
     button.Draw(ts->screenright, i == sel.popup_index);
     if (i == ColorOption(sel.popup)) {
@@ -289,8 +259,9 @@ static void DrawSelectionPopup(App &app, Text *ts) {
   ts->MarkScreenDirty(ts->screenright);
 }
 
-static int PopupOptionAt(Text *ts, int x, int y) {
-  for (int i = 0; i < kPopupOptionCount; i++) {
+static int PopupOptionAt(const TextSelectionState &sel, Text *ts, int x,
+                         int y) {
+  for (int i = 0; i < PopupOptionCount(sel); i++) {
     Button button(ts);
     LayoutPopupButton(&button, i);
     if (button.EnclosesPoint((u16)x, (u16)y))
@@ -446,15 +417,28 @@ static void RedrawSelection(App &app, Book *book, Text *ts) {
   }
   if (sel.mirror_top)
     DrawTopMirror(ts);
-  DrawSelectionPopup(app, ts);
+  if (word_lookup_panel::IsVisible())
+    word_lookup_panel::Draw(ts);
+  else
+    DrawSelectionPopup(app, ts);
   ts->MarkScreenDirty(ts->screenleft);
   ts->MarkScreenDirty(ts->screenright);
   // The status bar is drawn over the page; the snapshot predates it.
   app.RequestStatusRedraw();
 }
 
+// What the lookup panel shows, so A can switch to the other source.
+enum class PanelSource : uint8_t { Dictionary, Online };
+// Waiting for the "Looking up..." panel to be on screen before the
+// (blocking) lookup runs on the next frame.
+enum class PendingLookup : uint8_t { None, Dictionary, Online };
+static PendingLookup s_pending_lookup = PendingLookup::None;
+static PanelSource s_panel_source = PanelSource::Dictionary;
+
 static void ExitSelectionMode(App &app, Book *book, Text *ts) {
   app.MutableTextSelection().ResetSelection();
+  word_lookup_panel::Hide();
+  s_pending_lookup = PendingLookup::None;
   ReleasePageSnapshot();
   if (book) {
     book->SetWordCaptureEnabled(false);
@@ -463,12 +447,15 @@ static void ExitSelectionMode(App &app, Book *book, Text *ts) {
   app.RequestStatusRedraw();
 }
 
-static bool EnterSelectionMode(App &app, Book *book, Text *ts) {
+static bool EnterSelectionMode(App &app, Book *book, Text *ts, bool lookup) {
   if (!book || !ts || !book->SupportsAnnotations())
     return false;
   TextSelectionState &sel = app.MutableTextSelection();
   sel.ResetSelection();
+  word_lookup_panel::Hide();
+  s_pending_lookup = PendingLookup::None;
   sel.active = true;
+  sel.lookup = lookup;
   book->SetWordCaptureEnabled(true);
   // One full draw records the word boxes; everything after works on a copy.
   book_nav::DrawPage(book, ts);
@@ -623,8 +610,237 @@ static uint64_t AddSelectedHighlight(Book *book,
                                           sel.popup_color);
 }
 
+// --- Word lookup -----------------------------------------------------------
+
+static const size_t kMaxDictionaryResults = 6;
+// The landscape status bar is drawn at the bottom of the touch screen.
+static const int kLandscapeStatusReservePx = 20;
+
+static dictionary::DictionarySet &Dictionaries() {
+  static dictionary::DictionarySet *set = NULL;
+  if (!set) {
+    set = new dictionary::DictionarySet();
+    // An SD card copy of a dictionary wins over the bundled one.
+    set->AddDirectory(paths::GetDictionaryDir());
+    set->AddDirectory(paths::kRomfsDictDir);
+  }
+  return *set;
+}
+
+static std::string WordBoxText(const annotation_text_utils::VisibleText &text,
+                               const WordBox &w) {
+  std::vector<uint32_t> cps;
+  for (size_t i = 0; i < text.chars.size(); i++)
+    if (text.buf_index[i] >= w.buf_begin && text.buf_index[i] < w.buf_end)
+      cps.push_back(text.chars[i]);
+  return annotation_text_utils::CodepointsToUtf8(cps, 0, cps.size());
+}
+
+static bool OnLaterLine(const WordBox &a, const WordBox &b) {
+  return b.screen_index > a.screen_index ||
+         (b.screen_index == a.screen_index && b.bounds.y0 > a.bounds.y0);
+}
+
+// The word at index as text, rejoined when hyphenation split it over two
+// lines, without the punctuation around it.
+static std::string PickedWord(Book *book, const std::vector<WordBox> &words,
+                              int index) {
+  Page *page = book->GetPage();
+  if (!page || !page->GetBuffer() || index < 0 || index >= (int)words.size())
+    return std::string();
+  annotation_text_utils::VisibleText text;
+  annotation_text_utils::ExtractVisibleText(page->GetBuffer(),
+                                            page->GetLength(), &text);
+  const WordBox &w = words[(size_t)index];
+  const std::string raw = WordBoxText(text, w);
+  std::string joined;
+  if (index + 1 < (int)words.size() && OnLaterLine(w, words[(size_t)index + 1]))
+    joined = word_lookup_utils::JoinHyphenated(
+        raw, WordBoxText(text, words[(size_t)index + 1]));
+  if (joined.empty() && index > 0 && OnLaterLine(words[(size_t)index - 1], w))
+    joined = word_lookup_utils::JoinHyphenated(
+        WordBoxText(text, words[(size_t)index - 1]), raw);
+  return word_lookup_utils::CleanSelectedWord(joined.empty() ? raw : joined);
+}
+
+// The inline link (index in the page's rendered links) the word is part
+// of, -1 if none.
+static int LinkAtWord(Book *book, const WordBox &w) {
+  const std::vector<Page::InlineLinkRenderEntry> *links =
+      CurrentPageInlineLinks(book);
+  if (!links)
+    return -1;
+  for (size_t i = 0; i < links->size(); i++) {
+    const Page::InlineLinkRenderEntry &e = (*links)[i];
+    if (e.screen_index == w.screen_index && e.bounds.x0 < w.bounds.x1 &&
+        w.bounds.x0 < e.bounds.x1 && e.bounds.y0 < w.bounds.y1 &&
+        w.bounds.y0 < e.bounds.y1)
+      return (int)i;
+  }
+  return -1;
+}
+
+static void OpenLookupPopup(App &app, Book *book, Text *ts) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  if (!words || sel.cursor < 0 || sel.cursor >= (int)words->size())
+    return;
+  sel.popup_word = PickedWord(book, *words, sel.cursor);
+  sel.popup_link = LinkAtWord(book, (*words)[(size_t)sel.cursor]);
+  if (sel.popup_word.empty() && sel.popup_link < 0) {
+    app.PrintStatus("No word here to look up");
+    return;
+  }
+  sel.popup = SelectionPopup::WordLookup;
+  // On a link (a footnote mark, say) following it is the likely choice.
+  sel.popup_index = sel.popup_link >= 0 ? 2 : 0;
+  RedrawSelection(app, book, ts);
+}
+
+static void ShowLookupPanel(App &app, Book *book, Text *ts,
+                            const std::vector<word_lookup_panel::Section> &sections,
+                            PanelSource source) {
+  const TextSelectionState &sel = app.MutableTextSelection();
+  s_panel_source = source;
+  const char *footer = source == PanelSource::Dictionary
+                           ? "A: look up online   B: back"
+                           : "A: dictionary   B: back";
+  const int reserve =
+      orientation_utils::IsLandscape((unsigned char)book->GetOrientation())
+          ? kLandscapeStatusReservePx
+          : 0;
+  word_lookup_panel::Show(ts, sel.popup_word, sections, footer, reserve);
+  RedrawSelection(app, book, ts);
+}
+
+static void ShowLookupMessage(App &app, Book *book, Text *ts,
+                              const std::string &message, PanelSource source) {
+  std::vector<word_lookup_panel::Section> sections(1);
+  sections[0].text = message;
+  ShowLookupPanel(app, book, ts, sections, source);
+}
+
+// Shows "Looking up..." now; the lookup runs on the next frame.
+static void StartLookup(App &app, Book *book, Text *ts, PendingLookup kind) {
+  if (app.MutableTextSelection().popup_word.empty())
+    return;
+  const bool online = kind == PendingLookup::Online;
+  ShowLookupMessage(app, book, ts,
+                    online ? "Looking up online...\nThis takes a few seconds."
+                           : "Looking up...",
+                    online ? PanelSource::Online : PanelSource::Dictionary);
+  s_pending_lookup = kind;
+}
+
+static void RunDictionaryLookup(App &app, Book *book, Text *ts) {
+  const std::string word = app.MutableTextSelection().popup_word;
+  dictionary::DictionarySet &set = Dictionaries();
+  const std::vector<dictionary::Result> results =
+      set.Lookup(word, kMaxDictionaryResults);
+  std::vector<word_lookup_panel::Section> sections;
+  for (size_t i = 0; i < results.size(); i++) {
+    word_lookup_panel::Section section;
+    section.heading = results[i].dictionary;
+    section.text = results[i].text;
+    sections.push_back(section);
+  }
+  if (!sections.empty()) {
+    ShowLookupPanel(app, book, ts, sections, PanelSource::Dictionary);
+    return;
+  }
+  std::string message;
+  if (set.size() == 0) {
+    message = "No dictionary found. Put StarDict dictionaries (.ifo, .idx and "
+              ".dict.dz) in " +
+              paths::GetDictionaryDir() + "/";
+    for (size_t i = 0; i < set.errors().size(); i++)
+      message += "\n" + set.errors()[i];
+  } else {
+    message = "\"" + word + "\" isn't in the dictionary.";
+  }
+  ShowLookupMessage(app, book, ts, message, PanelSource::Dictionary);
+}
+
+static void RunOnlineLookup(App &app, Book *book, Text *ts) {
+  web_lookup::Result result;
+  web_lookup::Lookup(app.MutableTextSelection().popup_word, &result);
+  std::vector<word_lookup_panel::Section> sections;
+  for (size_t i = 0; i < result.sections.size(); i++) {
+    word_lookup_panel::Section section;
+    section.heading = result.sections[i].title;
+    section.text = result.sections[i].text;
+    if (!result.sections[i].url.empty())
+      section.text += "\n" + result.sections[i].url;
+    sections.push_back(section);
+  }
+  if (sections.empty()) {
+    ShowLookupMessage(app, book, ts, result.error, PanelSource::Online);
+    return;
+  }
+  ShowLookupPanel(app, book, ts, sections, PanelSource::Online);
+}
+
+static void FollowLinkFromLookup(App &app, Book *book, Text *ts) {
+  const int link = app.MutableTextSelection().popup_link;
+  app.MutableTextSelection().ResetSelection();
+  word_lookup_panel::Hide();
+  s_pending_lookup = PendingLookup::None;
+  ReleasePageSnapshot();
+  book->SetWordCaptureEnabled(false);
+  book->SetFocusedInlineLinkIndex(link);
+  if (!FollowFocusedInlineLink(book, ts)) {
+    book->ClearFocusedInlineLink();
+    book_nav::DrawPage(book, ts);
+    app.PrintStatus("Link target not found");
+  }
+  app.RequestStatusRedraw();
+}
+
+static void RunLookupOption(App &app, Book *book, Text *ts, int option) {
+  switch (LookupActionAt(app.MutableTextSelection(), option)) {
+  case LookupAction::Dictionary:
+    StartLookup(app, book, ts, PendingLookup::Dictionary);
+    break;
+  case LookupAction::Online:
+    StartLookup(app, book, ts, PendingLookup::Online);
+    break;
+  case LookupAction::FollowLink:
+    FollowLinkFromLookup(app, book, ts);
+    break;
+  default:
+    ClosePopup(app, book, ts);
+    break;
+  }
+}
+
+// In lookup mode, moving past the last word (or before the first) turns
+// the page.
+static bool TurnLookupPage(App &app, Book *book, Text *ts, int direction) {
+  TextSelectionState &sel = app.MutableTextSelection();
+  const int page = book->GetPosition();
+  const int target = page + direction;
+  if (target < 0 || target >= (int)book->GetPageCount())
+    return false;
+  book_nav::SetPage(book, ts, (uint16_t)target);
+  if (!RecapturePage(book, ts)) {
+    // Nothing to pick there (e.g. a picture): stay where we were.
+    book_nav::SetPage(book, ts, (uint16_t)page);
+    RecapturePage(book, ts);
+    RedrawSelection(app, book, ts);
+    return true;
+  }
+  const std::vector<WordBox> *words = CurrentPageWords(book);
+  sel.cursor = direction > 0 ? 0 : (int)words->size() - 1;
+  RedrawSelection(app, book, ts);
+  return true;
+}
+
 static void RunPopupOption(App &app, Book *book, Text *ts, int option) {
   TextSelectionState &sel = app.MutableTextSelection();
+  if (sel.popup == SelectionPopup::WordLookup) {
+    RunLookupOption(app, book, ts, option);
+    return;
+  }
   if (option == ColorOption(sel.popup)) {
     StepPopupColor(app, book, ts, 1);
     return;
@@ -732,6 +948,75 @@ static int TouchedWord(App &app, Book *book, Text *ts,
                                            sx, sy, pad);
 }
 
+// One frame while the lookup panel is shown: runs a pending lookup, and
+// otherwise scrolls (D-pad, L/R, touch the upper or lower half), switches
+// source (A) or goes back to the word cursor (B).
+static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
+                                   const FrameInput &input) {
+  using text_selection_utils::ScreenDirection;
+  TextSelectionState &sel = app.MutableTextSelection();
+  if (s_pending_lookup != PendingLookup::None) {
+    const PendingLookup kind = s_pending_lookup;
+    s_pending_lookup = PendingLookup::None;
+    if (kind == PendingLookup::Online)
+      RunOnlineLookup(app, book, ts);
+    else
+      RunDictionaryLookup(app, book, ts);
+    return;
+  }
+  const uint32_t keys = input.keys_down;
+  const uint32_t held = input.keys_held;
+  const ScreenDirection pressed = PressedDirection(app, book, keys);
+  const ScreenDirection held_dir = PressedDirection(app, book, held);
+  const uint64_t now_ms = input.timestamp_ms;
+  if (keys & app.key.b) {
+    word_lookup_panel::Hide();
+    sel.popup = SelectionPopup::None;
+    RedrawSelection(app, book, ts);
+    return;
+  }
+  if (keys & app.key.a) {
+    StartLookup(app, book, ts,
+                s_panel_source == PanelSource::Dictionary
+                    ? PendingLookup::Online
+                    : PendingLookup::Dictionary);
+    return;
+  }
+  if (keys & (app.key.start | app.key.select | app.key.x)) {
+    ExitSelectionMode(app, book, ts);
+    return;
+  }
+  bool moved = false;
+  if (keys & app.key.l) {
+    moved = word_lookup_panel::Scroll(ts, -1, true);
+  } else if (keys & app.key.r) {
+    moved = word_lookup_panel::Scroll(ts, 1, true);
+  } else if (pressed == ScreenDirection::Up ||
+             pressed == ScreenDirection::Down) {
+    sel.repeat_direction = pressed;
+    sel.repeat_next_ms = now_ms + kCursorRepeatDelayMs;
+    moved = word_lookup_panel::Scroll(
+        ts, pressed == ScreenDirection::Up ? -1 : 1, false);
+  } else if (pressed == ScreenDirection::Left ||
+             pressed == ScreenDirection::Right) {
+    moved = word_lookup_panel::Scroll(
+        ts, pressed == ScreenDirection::Left ? -1 : 1, true);
+  } else if (keys & KEY_TOUCH) {
+    const touchPosition mapped = app.MapTouch(input);
+    moved = word_lookup_panel::Scroll(
+        ts, (int)mapped.py < ts->LogicalHeightFor(false) / 2 ? -1 : 1, true);
+  } else if (held_dir != ScreenDirection::None &&
+             held_dir == sel.repeat_direction && now_ms >= sel.repeat_next_ms) {
+    sel.repeat_next_ms = now_ms + kCursorRepeatIntervalMs;
+    moved = word_lookup_panel::Scroll(
+        ts, held_dir == ScreenDirection::Up ? -1 : 1, false);
+  } else if (held_dir != sel.repeat_direction) {
+    sel.repeat_direction = ScreenDirection::None;
+  }
+  if (moved)
+    RedrawSelection(app, book, ts);
+}
+
 // Handles one frame of input while selection mode is active. Always
 // consumes the input.
 static bool HandleSelectionInput(App &app, Book *book, Text *ts,
@@ -740,6 +1025,10 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
   TextSelectionState &sel = app.MutableTextSelection();
   const uint32_t keys = input.keys_down;
   const uint32_t held = input.keys_held;
+  if (word_lookup_panel::IsVisible()) {
+    HandleLookupPanelInput(app, book, ts, input);
+    return true;
+  }
   const std::vector<WordBox> *words = CurrentPageWords(book);
   if (!words || words->empty()) {
     ExitSelectionMode(app, book, ts);
@@ -756,16 +1045,17 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     } else if (pressed == ScreenDirection::Up ||
                pressed == ScreenDirection::Down) {
       sel.popup_index = text_selection_utils::StepPopupIndex(
-          kPopupOptionCount, sel.popup_index,
+          PopupOptionCount(sel), sel.popup_index,
           pressed == ScreenDirection::Up ? -1 : 1);
       RedrawSelection(app, book, ts);
-    } else if (pressed == ScreenDirection::Left ||
-               pressed == ScreenDirection::Right) {
+    } else if (sel.popup != SelectionPopup::WordLookup &&
+               (pressed == ScreenDirection::Left ||
+                pressed == ScreenDirection::Right)) {
       StepPopupColor(app, book, ts,
                      pressed == ScreenDirection::Left ? -1 : 1);
     } else if (keys & KEY_TOUCH) {
       const touchPosition mapped = app.MapTouch(input);
-      const int option = PopupOptionAt(ts, mapped.px, mapped.py);
+      const int option = PopupOptionAt(sel, ts, mapped.px, mapped.py);
       if (option >= 0) {
         sel.popup_index = option;
         RunPopupOption(app, book, ts, option);
@@ -774,12 +1064,13 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     return true;
   }
 
-  // Touch drag: select from the touched word to the word under the finger.
+  // Touch drag: select from the touched word to the word under the finger
+  // (lookup: the word under the finger when it lifts).
   if (keys & KEY_TOUCH) {
     const int word = TouchedWord(app, book, ts, *words, input);
     if (word >= 0) {
       // A selection carried from the previous page keeps its start.
-      if (sel.carried_page < 0)
+      if (!sel.lookup && sel.carried_page < 0)
         sel.anchor = word;
       sel.cursor = word;
       sel.touch_dragging = true;
@@ -792,7 +1083,10 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
       MoveCursorTo(app, book, ts, TouchedWord(app, book, ts, *words, input));
     } else {
       sel.touch_dragging = false;
-      OpenPopupForSelection(app, book, ts);
+      if (sel.lookup)
+        OpenLookupPopup(app, book, ts);
+      else
+        OpenPopupForSelection(app, book, ts);
     }
     return true;
   }
@@ -817,6 +1111,12 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     sel.repeat_direction = ScreenDirection::None;
     return true;
   }
+  if (sel.lookup && ((forward && sel.cursor == word_count - 1) ||
+                     (backward && sel.cursor == 0)) &&
+      TurnLookupPage(app, book, ts, forward ? 1 : -1)) {
+    sel.repeat_direction = ScreenDirection::None;
+    return true;
+  }
   if (pressed != ScreenDirection::None) {
     sel.repeat_direction = pressed;
     sel.repeat_next_ms = now_ms + kCursorRepeatDelayMs;
@@ -832,7 +1132,9 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
   }
 
   if (keys & app.key.a) {
-    if (sel.anchor < 0 && !HighlightUnderCursor(book, sel)) {
+    if (sel.lookup) {
+      OpenLookupPopup(app, book, ts);
+    } else if (sel.anchor < 0 && !HighlightUnderCursor(book, sel)) {
       sel.anchor = sel.cursor;
       RedrawSelection(app, book, ts);
     } else {
@@ -871,7 +1173,6 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
   const uint32_t keys = input.keys_down;
   const uint32_t held = input.keys_held;
   bool status_dirty = false;
-  const bool has_inline_links = CurrentPageHasInlineLinks(book);
   const uint64_t now_ms = input.timestamp_ms;
   TextSelectionState &selection = app.MutableTextSelection();
 
@@ -883,7 +1184,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
 
   // X: short press cycles the colour theme (on release), hold enters text
   // selection for highlights and notes.
-  if (!app.IsInlineLinkFocusActive() && (keys & app.key.x)) {
+  if (keys & app.key.x) {
     selection.x_hold_armed = true;
     selection.x_hold_consumed = false;
     selection.x_hold_started_ms = now_ms;
@@ -893,7 +1194,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       now_ms >= selection.x_hold_started_ms + kSelectionHoldThresholdMs) {
     selection.x_hold_consumed = true;
     app.ResetPageRepeat();
-    if (EnterSelectionMode(app, book, ts))
+    if (EnterSelectionMode(app, book, ts, false))
       return true;
   }
   if (selection.x_hold_armed && !(held & app.key.x)) {
@@ -901,7 +1202,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     selection.x_hold_armed = false;
     selection.x_hold_consumed = false;
     selection.x_hold_started_ms = 0;
-    if (!consumed && !app.IsInlineLinkFocusActive()) {
+    if (!consumed) {
       int mode = ts->GetColorMode();
       int next = (mode + 1) % 6;
       app.colorMode = next;
@@ -913,133 +1214,106 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     }
   }
 
-  if (!app.IsInlineLinkFocusActive() && (keys & app.key.y)) {
-    app.SetInlineLinkHoldArmed(true);
-    app.SetInlineLinkHoldConsumed(false);
-    app.SetInlineLinkHoldStartedAtMs(now_ms);
+  // Y: short press toggles a bookmark (on release), hold enters word lookup.
+  if (keys & app.key.y) {
+    selection.y_hold_armed = true;
+    selection.y_hold_consumed = false;
+    selection.y_hold_started_ms = now_ms;
+  }
+  if (selection.y_hold_armed && (held & app.key.y) &&
+      !selection.y_hold_consumed &&
+      now_ms >= selection.y_hold_started_ms + kSelectionHoldThresholdMs) {
+    selection.y_hold_consumed = true;
+    app.ResetPageRepeat();
+    if (EnterSelectionMode(app, book, ts, true))
+      return true;
   }
 
-  if (!app.IsInlineLinkFocusActive() && app.IsInlineLinkHoldArmed() &&
-      (held & app.key.y) && !app.IsInlineLinkHoldConsumed() &&
-      has_inline_links &&
-      now_ms >= app.GetInlineLinkHoldStartedAtMs() + kInlineLinkHoldThresholdMs) {
-    if (EnterInlineLinkFocus(&app, book, ts)) {
-      app.SetInlineLinkHoldConsumed(true);
+  // D-pad up/down support page repeat. Circle Pad repeat is opt-in because
+  // analog drift can otherwise trigger fast accidental page turns.
+  const bool circle_repeat_enabled =
+      app.prefs.get() && app.prefs->circle_pad_page_turn;
+  const uint32_t repeat_next_keys =
+      reader_input_utils::ReflowablePageRepeatKeys(
+          app.key.down, app.key.ddown, circle_repeat_enabled);
+  const uint32_t repeat_prev_keys =
+      reader_input_utils::ReflowablePageRepeatKeys(
+          app.key.up, app.key.dup, circle_repeat_enabled);
+  const uint32_t repeat_keys = repeat_next_keys | repeat_prev_keys;
+  const uint32_t non_repeat_held = held & ~repeat_keys;
+  const uint32_t non_repeat_keys = keys & ~repeat_keys;
+  bool repeat_next = false;
+  bool repeat_prev = false;
+  if (non_repeat_held == 0 && non_repeat_keys == 0 &&
+      (held & repeat_next_keys)) {
+    repeat_next = app.ShouldFirePageRepeat(
+        reader::PAGE_REPEAT_NEXT, (keys & repeat_next_keys) != 0,
+        (held & repeat_next_keys) != 0, now_ms,
+        kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
+  } else if (non_repeat_held == 0 && non_repeat_keys == 0 &&
+             (held & repeat_prev_keys)) {
+    repeat_prev = app.ShouldFirePageRepeat(
+        reader::PAGE_REPEAT_PREVIOUS, (keys & repeat_prev_keys) != 0,
+        (held & repeat_prev_keys) != 0, now_ms,
+        kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
+  } else if ((held & repeat_keys) == 0 || non_repeat_held != 0) {
+    app.ResetPageRepeat();
+  }
+
+  if ((keys & ctrl.page_next) || repeat_next) {
+    if (!book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty))
+      app.ResetPageRepeat();
+  } else if ((keys & ctrl.page_prev) || repeat_prev) {
+    if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
       status_dirty = true;
+    else
+      app.ResetPageRepeat();
+  } else if (keys & app.key.x) {
+    // x: colour cycle on release / selection on hold, handled above
+  } else if (keys & app.key.y) {
+    // y: bookmark on release / word lookup on hold, handled above
+  } else if (keys & KEY_TOUCH) {
+    app.ResetPageRepeat();
+    touchPosition mapped = app.MapTouch(input);
+    if (TryFollowTouchLink(book, ts, (int)mapped.px, (int)mapped.py)) {
+      status_dirty = true;
+    } else {
+      const bool forward_zone =
+          ((int)mapped.px >= ts->LogicalWidth() / 2);
+      if (!forward_zone) {
+        if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
+          status_dirty = true;
+      } else {
+        book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty);
+      }
     }
-  }
-
-  if (app.IsInlineLinkFocusActive()) {
-    if (keys & (app.key.b | app.key.y)) {
-      ExitInlineLinkFocus(&app, book);
+  } else if (keys & ctrl.back_to_library) {
+    app.ResetPageRepeat();
+    app.ShowLibraryView();
+  } else if (keys & ctrl.open_settings) {
+    app.ResetPageRepeat();
+    app.ShowSettingsView(true);
+    app.prefs->Write();
+  } else if (keys & (ctrl.bookmark_prev | ctrl.bookmark_next)) {
+    app.ResetPageRepeat();
+    app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
+        book->GetBookmarks(), book->GetPosition(),
+        (keys & ctrl.bookmark_prev)
+            ? app_flow_utils::BookmarkJumpDirection::Previous
+            : app_flow_utils::BookmarkJumpDirection::Next);
+    if (jump.found) {
+      book->SetPosition(jump.page);
       book_nav::DrawPage(book, ts);
       status_dirty = true;
-    } else if (keys & app.key.a) {
-      if (FollowFocusedInlineLink(book, ts)) {
-        app.SetInlineLinkFocusActive(false);
-        status_dirty = true;
-      }
-    } else if (keys & ctrl.link_next) {
-      if (MoveInlineLinkFocusSequential(book, ts, 1))
-        status_dirty = true;
-    } else if (keys & ctrl.link_prev) {
-      if (MoveInlineLinkFocusSequential(book, ts, -1))
-        status_dirty = true;
-    } else if (keys & ctrl.back_to_library) {
-      ExitInlineLinkFocus(&app, book);
-      app.ShowLibraryView();
-    } else if (keys & ctrl.open_settings) {
-      ExitInlineLinkFocus(&app, book);
-      app.ShowSettingsView(true);
-      app.prefs->Write();
     }
-  } else {
-    // D-pad up/down support page repeat. Circle Pad repeat is opt-in because
-    // analog drift can otherwise trigger fast accidental page turns.
-    const bool circle_repeat_enabled =
-        app.prefs.get() && app.prefs->circle_pad_page_turn;
-    const uint32_t repeat_next_keys =
-        reader_input_utils::ReflowablePageRepeatKeys(
-            app.key.down, app.key.ddown, circle_repeat_enabled);
-    const uint32_t repeat_prev_keys =
-        reader_input_utils::ReflowablePageRepeatKeys(
-            app.key.up, app.key.dup, circle_repeat_enabled);
-    const uint32_t repeat_keys = repeat_next_keys | repeat_prev_keys;
-    const uint32_t non_repeat_held = held & ~repeat_keys;
-    const uint32_t non_repeat_keys = keys & ~repeat_keys;
-    bool repeat_next = false;
-    bool repeat_prev = false;
-    if (non_repeat_held == 0 && non_repeat_keys == 0 &&
-        (held & repeat_next_keys)) {
-      repeat_next = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_NEXT, (keys & repeat_next_keys) != 0,
-          (held & repeat_next_keys) != 0, now_ms,
-          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if (non_repeat_held == 0 && non_repeat_keys == 0 &&
-               (held & repeat_prev_keys)) {
-      repeat_prev = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_PREVIOUS, (keys & repeat_prev_keys) != 0,
-          (held & repeat_prev_keys) != 0, now_ms,
-          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if ((held & repeat_keys) == 0 || non_repeat_held != 0) {
-      app.ResetPageRepeat();
-    }
+  }
 
-    if ((keys & ctrl.page_next) || repeat_next) {
-      if (!book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty))
-        app.ResetPageRepeat();
-    } else if ((keys & ctrl.page_prev) || repeat_prev) {
-      if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
-        status_dirty = true;
-      else
-        app.ResetPageRepeat();
-    } else if (keys & app.key.x) {
-      // x: colour cycle on release / selection on hold, handled above
-    } else if (keys & app.key.y) {
-      // y without hold: consumed by hold-arm; no-op here
-    } else if (keys & KEY_TOUCH) {
-      app.ResetPageRepeat();
-      touchPosition mapped = app.MapTouch(input);
-      if (TryFollowTouchLink(book, ts, (int)mapped.px, (int)mapped.py)) {
-        status_dirty = true;
-      } else {
-        const bool forward_zone =
-            ((int)mapped.px >= ts->LogicalWidth() / 2);
-        if (!forward_zone) {
-          if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
-            status_dirty = true;
-        } else {
-          book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty);
-        }
-      }
-    } else if (keys & ctrl.back_to_library) {
-      app.ResetPageRepeat();
-      app.ShowLibraryView();
-    } else if (keys & ctrl.open_settings) {
-      app.ResetPageRepeat();
-      app.ShowSettingsView(true);
-      app.prefs->Write();
-    } else if (keys & (ctrl.bookmark_prev | ctrl.bookmark_next)) {
-      app.ResetPageRepeat();
-      app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
-          book->GetBookmarks(), book->GetPosition(),
-          (keys & ctrl.bookmark_prev)
-              ? app_flow_utils::BookmarkJumpDirection::Previous
-              : app_flow_utils::BookmarkJumpDirection::Next);
-      if (jump.found) {
-        book->SetPosition(jump.page);
-        book_nav::DrawPage(book, ts);
-        status_dirty = true;
-      }
-    }
-  } // end else (reflowable input)
-
-  if (app.IsInlineLinkHoldArmed() && !(held & app.key.y)) {
-    const bool consumed = app.IsInlineLinkHoldConsumed();
-    app.SetInlineLinkHoldArmed(false);
-    app.SetInlineLinkHoldStartedAtMs(0);
-    app.SetInlineLinkHoldConsumed(false);
-    if (!consumed && !app.IsInlineLinkFocusActive())
+  if (selection.y_hold_armed && !(held & app.key.y)) {
+    const bool consumed = selection.y_hold_consumed;
+    selection.y_hold_armed = false;
+    selection.y_hold_consumed = false;
+    selection.y_hold_started_ms = 0;
+    if (!consumed)
       app.ToggleBookmark();
   }
 

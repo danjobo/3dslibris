@@ -252,14 +252,6 @@ public:
   void SetPdfTouchLastY(int y);
   u64 GetPdfDeferredReadyAtMs() const;
   void SetPdfDeferredReadyAtMs(u64 ready_at_ms);
-  bool IsInlineLinkFocusActive() const;
-  void SetInlineLinkFocusActive(bool active);
-  bool IsInlineLinkHoldArmed() const;
-  void SetInlineLinkHoldArmed(bool armed);
-  bool IsInlineLinkHoldConsumed() const;
-  void SetInlineLinkHoldConsumed(bool consumed);
-  u64 GetInlineLinkHoldStartedAtMs() const;
-  void SetInlineLinkHoldStartedAtMs(u64 started_at_ms);
   text_selection_utils::TextSelectionState &MutableTextSelection()
   {
     return reader_state_.text_selection;
@@ -400,10 +392,6 @@ private:
     int pdf_touch_last_x;
     int pdf_touch_last_y;
     u64 pdf_deferred_ready_at_ms;
-    bool inline_link_focus_active;
-    bool inline_link_hold_armed;
-    bool inline_link_hold_consumed;
-    u64 inline_link_hold_started_at_ms;
     reader::PageRepeatState page_repeat;
     text_selection_utils::TextSelectionState text_selection;
 
@@ -412,10 +400,8 @@ private:
           current_book_session_id(0), next_book_session_id(1),
           layout_revision(0),
           pdf_touch_drag_active(false), pdf_touch_last_x(-1),
-          pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
-          inline_link_focus_active(false), inline_link_hold_armed(false),
-          inline_link_hold_consumed(false),
-          inline_link_hold_started_at_ms(0), page_repeat(), text_selection() {}
+          pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0), page_repeat(),
+          text_selection() {}
   };
 
   NavigationState nav_;

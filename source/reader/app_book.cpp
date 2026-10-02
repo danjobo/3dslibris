@@ -578,15 +578,13 @@ void ReaderController::ToggleBookmark()
 void ReaderController::CloseBook()
 {
   Book *bookcurrent_ = app_.GetCurrentBook();
-  app_.SetInlineLinkFocusActive(false);
-  app_.SetInlineLinkHoldArmed(false);
-  app_.SetInlineLinkHoldConsumed(false);
-  app_.SetInlineLinkHoldStartedAtMs(0);
   text_selection_utils::TextSelectionState &selection =
       app_.MutableTextSelection();
   selection.ResetSelection();
   selection.x_hold_armed = false;
   selection.x_hold_consumed = false;
+  selection.y_hold_armed = false;
+  selection.y_hold_consumed = false;
 
   if (bookcurrent_)
   {

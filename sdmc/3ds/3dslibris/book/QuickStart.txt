@@ -95,6 +95,22 @@ Highlights & notes:
 - They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
   font size and layout changes and clearing the cache
 
+Word lookup:
+- Hold Y: enter word lookup (short Y press still toggles a bookmark)
+- Move the cursor as in selection mode (D-Pad, L / R, touch a word);
+  moving past the last word turns the page
+- A (or lifting your finger): choose Dictionary, Look up online, or
+  Follow link when the word is part of a link (footnotes)
+- Dictionary: the bundled English WordNet, plus any StarDict
+  dictionaries (.ifo, .idx and .dict.dz) you copy into
+  `sdmc:/3ds/3dslibris/dict/` (other languages too). Plurals and verb
+  forms are found too: "mice" shows mouse, "running" shows run
+- Look up online: Wiktionary's definitions and the Wikipedia summary,
+  with links to the pages. Needs Wi-Fi; takes a few seconds
+- In the definition: D-Pad up/down to scroll, left/right or L / R a
+  screen at a time (or touch the upper/lower half); A switches between
+  the dictionary and online; B goes back to the word cursor
+
 Syncing with another 3DS (Wi-Fi or local wireless):
 - Both consoles need 3dslibris and the same connection type. "connection"
   on the sync screen switches between Wi-Fi (same network) and local

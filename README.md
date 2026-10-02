@@ -30,6 +30,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Global and per-book controls for font size, spacing, and EPUB publisher layout.
 - Reading progress and bookmarks saved across library folders, with an option to reopen the last book on startup.
 - Highlights (five colors, including across a page break) and notes in reflowable books, listed with bookmarks for quick jumps and kept across font and layout changes. Upload them to Readwise over Wi-Fi, or export a CSV for its import.
+- Word lookup in reflowable books: hold `Y`, pick a word, and read its definition from the bundled English dictionary (WordNet) or any StarDict dictionary you add, or look it up online (Wiktionary and the Wikipedia summary).
 - Track reading progress on Hardcover: link a book once and progress (and finishing it) is sent when you leave the book.
 - Sync reading positions, bookmarks, highlights and notes with another 3DS over Wi-Fi or local wireless (host / join with a pairing code), and copy books only one console has.
 - Fixed-layout viewer for manga and document formats (`CBZ`, `PDF` and `XPS`) with zoom, pan, chapter navigation, and full-page preview.
@@ -99,7 +100,7 @@ Standard reading:
 - `A` / `B` / `L` / `R`: turn pages
 - `ZL` / `ZR` (New 3DS): previous or next page
 - `D-Pad Left` / `D-Pad Right`: jump between bookmarks
-- `Y`: toggle bookmark; hold `Y` on a page with inline links to enter link-focus mode, then D-Pad to move and `A` to follow
+- `Y`: toggle bookmark; hold `Y` to look up a word (D-Pad or touch to pick it, `A` for Dictionary / Look up online, or Follow link when the word is a link). Inline links can also be followed by touching them.
 - `X`: change background color; hold `X` to select text, then `A` to highlight it or add a note (D-Pad or touch drag to select)
 - `SELECT`: open `BOOK` settings (highlights and notes are listed under "bookmarks & notes")
 - `START`: return to library

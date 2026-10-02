@@ -24,6 +24,7 @@ static const char *kConfigSdmcBase  = "sdmc:/config/3dslibris";
 static const char *kLogFile      __attribute__((unused)) = "sdmc:/3ds/3dslibris/3dslibris.log";
 static const char *kRomfsBookDir __attribute__((unused)) = "romfs:/3ds/3dslibris/book";
 static const char *kRomfsFontDir __attribute__((unused)) = "romfs:/3ds/3dslibris/font";
+static const char *kRomfsDictDir __attribute__((unused)) = "romfs:/3ds/3dslibris/dict";
 
 // Bundled fonts (used by startup_controller.cpp)
 static const char *kDefaultFonts[][2] __attribute__((unused)) = {
@@ -124,6 +125,13 @@ inline const std::string &GetResourceDir() {
 // "clear cache" setting deletes.
 inline const std::string &GetAnnotationsDir() {
   static const std::string path = GetSdmcBase() + "/annotations";
+  return path;
+}
+
+// StarDict dictionaries for word lookup (each .ifo with its .idx and
+// .dict/.dict.dz, here or one folder down). The bundled WordNet is in romfs.
+inline const std::string &GetDictionaryDir() {
+  static const std::string path = GetSdmcBase() + "/dict";
   return path;
 }
 

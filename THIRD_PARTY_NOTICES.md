@@ -66,8 +66,26 @@ the corresponding source for that binary available.
 ### Jansson (devkitPro portlibs)
 
 - Linked from the devkitPro `3ds-jansson` package to read JSON replies
-  from web services (Hardcover).
+  from web services (Hardcover, Readwise, online word lookup).
 - License: MIT, https://github.com/akheron/jansson
+
+### WordNet 3.0 (bundled dictionary)
+
+- `sdmc/3ds/3dslibris/dict/wordnet/`: the English dictionary for word
+  lookup, converted to StarDict format by
+  `scripts/build_wordnet_stardict.py` from Princeton WordNet 3.0
+  (https://wordnet.princeton.edu/).
+- License: the WordNet 3.0 license (BSD-style), included as
+  `dict/wordnet/LICENSE.txt`. WordNet 3.0 Copyright 2006 by Princeton
+  University. All rights reserved.
+
+### Online word lookup (Wikimedia)
+
+- Online lookup fetches definitions from Wiktionary and summaries from
+  Wikipedia through the Wikimedia REST API at lookup time; nothing from
+  them is bundled. Their text is available under CC BY-SA 4.0
+  (https://creativecommons.org/licenses/by-sa/4.0/); each result shows
+  its source page.
 
 ### Mozilla CA certificate bundle
 
