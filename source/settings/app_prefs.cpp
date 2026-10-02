@@ -498,6 +498,13 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   const u32 held = input.keys_held;
   const u32 left_keys = app_.key.left | app_.key.dleft;
   const u32 right_keys = app_.key.right | app_.key.dright;
+  // Moving through the list follows the screen's rotation (see
+  // DpadListKeysFor); the Circle Pad keeps its old mapping.
+  const prefs_input_utils::DpadListKeys dpad_list =
+      prefs_input_utils::DpadListKeysFor(app_.render_orientation,
+                                         app_.key.dleft, app_.key.dright);
+  const u32 previous_keys = app_.key.left | dpad_list.previous;
+  const u32 next_keys = app_.key.right | dpad_list.next;
   const u32 up_keys = app_.key.up | app_.key.dup;
   const u32 down_keys = app_.key.down | app_.key.ddown;
 #ifdef DSLIBRIS_DEBUG
@@ -554,7 +561,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   } else if (prefs_input_utils::ShouldReturnFromPrefs(
                  keys, book_ctx, KEY_B, KEY_SELECT, KEY_Y, KEY_START)) {
     app_.ReturnFromPrefs();
-  } else if (keys & (left_keys | app_.key.l)) {
+  } else if (keys & (previous_keys | app_.key.l)) {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
@@ -563,7 +570,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
     } else if (prefs_general_page_ == 1 && has_submenu) {
       GoToPrefsPage(0);
     }
-  } else if (keys & (right_keys | app_.key.r)) {
+  } else if (keys & (next_keys | app_.key.r)) {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();

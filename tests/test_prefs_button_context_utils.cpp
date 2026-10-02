@@ -123,9 +123,25 @@ static void TestSettingsInputContext() {
     assert(!prefs_input_utils::ShouldRedrawPrefsAfterOverlayInput(dirty, false));
   }
 }
+static void TestDpadFollowsRotation() {
+  const uint32_t kLeft = 1u << 5, kRight = 1u << 4;
+  // Turned left (the default): the right arrow points up the list.
+  prefs_input_utils::DpadListKeys keys =
+      prefs_input_utils::DpadListKeysFor(0, kLeft, kRight);
+  test::ExpectEqU("turned left: right selects previous", keys.previous, kRight);
+  test::ExpectEqU("turned left: left selects next", keys.next, kLeft);
+  keys = prefs_input_utils::DpadListKeysFor(1, kLeft, kRight);
+  test::ExpectEqU("turned right: left selects previous", keys.previous, kLeft);
+  test::ExpectEqU("turned right: right selects next", keys.next, kRight);
+  keys = prefs_input_utils::DpadListKeysFor(2, kLeft, kRight);
+  test::ExpectEqU("landscape: left selects previous", keys.previous, kLeft);
+  test::ExpectEqU("landscape: right selects next", keys.next, kRight);
+}
+
 int main() {
   TestSettingsActions();
   TestSettingsInputContext();
+  TestDpadFollowsRotation();
   settings::PrefsPageContext page;
   test::ExpectEq("new settings view starts on the general page",
                  settings::PrefsPageButtonForSlot(page, 0),
