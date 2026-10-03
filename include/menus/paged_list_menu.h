@@ -44,6 +44,8 @@ protected:
                             std::vector<std::string> &labels,
                             std::vector<u16> &pages) = 0;
   virtual bool ResolveTargetPage(u16 index, u16 *page_out);
+  // The book the menu is for, before Init() has stored it.
+  Book *ContextBook() const { return context_.GetCurrentBook(); }
 
   Book *current_book_;
 

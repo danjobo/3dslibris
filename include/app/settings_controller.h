@@ -32,6 +32,9 @@ private:
   App &app_;
   GoToPageDialog go_to_page_dialog_;
   int prefs_general_page_;
+  // When BOOK settings were last opened from the reader (ms): SELECT again
+  // within kSelectDoubleTapMs opens the character list instead.
+  u64 opened_from_book_ms_ = 0;
   Button button_prefs_page_nav_;
   Button button_prefs_library_;  // "library" button shown in book context
 

@@ -59,6 +59,7 @@ https://github.com/rhaleblian/dslibris
 #include "expat.h"
 
 #include "menus/bookmark_menu.h"
+#include "menus/character_menu.h"
 #include "menus/chapter_menu.h"
 #include "library/library_job.h"
 #include "settings/font.h"
@@ -138,6 +139,7 @@ public:
 
   std::unique_ptr<FontMenu> fontmenu; //! Font selection menu.
   std::unique_ptr<BookmarkMenu> bookmarkmenu;
+  std::unique_ptr<CharacterMenu> charactermenu;
   std::unique_ptr<ChapterMenu> chaptermenu;
 
   // app.cpp
@@ -187,6 +189,7 @@ public:
   void PersistPrefs();
   void RunFontMenuFrame(const FrameInput &input);
   void RunBookmarksMenuFrame(const FrameInput &input);
+  void RunCharactersMenuFrame(const FrameInput &input);
   void RunChaptersMenuFrame(const FrameInput &input);
   void RunBookInfoFrame(const FrameInput &input);
   bool PresentIfDirty();
@@ -285,6 +288,8 @@ public:
   void ShowLibraryView();
   void ReturnFromPrefs();
   void ShowBookmarksView();
+  // The character list, or one character's mentions (character_id != 0).
+  void ShowCharactersView(uint64_t character_id = 0);
   void ShowChaptersView();
   void ShowBookInfoView();
   void ShowSyncView();

@@ -183,6 +183,23 @@ void App::ShowBookmarksView()
   bookmarkmenu->Init();
 }
 
+void App::ShowCharactersView(uint64_t character_id)
+{
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::Characters;
+  charactermenu->Open(character_id);
+  // The search runs on the next frame, once this is on screen.
+  ts->SetScreen(ts->screenright);
+  ts->ClearScreen();
+  DrawBottomGradientBackground();
+  const int saved_style = ts->GetStyle();
+  ts->SetStyle(TEXT_STYLE_BROWSER);
+  ts->SetPen(8, 30);
+  ts->PrintString("Finding mentions...");
+  ts->SetStyle(saved_style);
+  ts->MarkScreenDirty(ts->screenright);
+}
+
 void App::ShowChaptersView()
 {
   ApplyRenderOrientation(portrait_orientation);

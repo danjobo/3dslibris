@@ -28,7 +28,8 @@ struct WordBox {
 
 enum class SelectionPopup : uint8_t {
   None = 0,
-  NewSelection,      // Highlight / Highlight + note / Color / Cancel
+  NewSelection,      // Highlight / Highlight + note / Color / Character /
+                     // Cancel
   ExistingHighlight, // Edit note / Color / Delete / Cancel
   WordLookup,        // Dictionary / Look up online / [Follow link] / Cancel
 };
@@ -62,6 +63,9 @@ struct TextSelectionState {
   // in the page's rendered links, -1 if none).
   std::string popup_word;
   int popup_link = -1;
+  // New selection: the saved character with the selected text as its name
+  // (0 if none); popup_word holds the selected text.
+  uint64_t popup_character_id = 0;
 
   // A selection carried over a page break: it started at carried_buf_begin
   // on carried_page; on the current page it covers word 0 to the cursor.
@@ -93,6 +97,7 @@ struct TextSelectionState {
     popup_color = 0;
     popup_word.clear();
     popup_link = -1;
+    popup_character_id = 0;
     carried_page = -1;
     carried_buf_begin = -1;
   }

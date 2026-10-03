@@ -144,13 +144,17 @@ using text_selection_utils::WordBox;
 
 static const uint64_t kSelectionHoldThresholdMs = 400;
 static const int kTouchWordPadPx = 6;
-static const int kMaxPopupOptions = 4;
+static const int kMaxPopupOptions = 5;
 static const int kPopupButtonW = 220;
-static const int kPopupButtonH = 36;
+static const int kPopupButtonH = 32;
 static const int kPopupButtonX = 10;
-// Four rows fit the 240px-tall touch screen in landscape too.
-static const int kPopupButtonY0 = 48;
-static const int kPopupButtonStride = 42;
+// Five rows fit the 240px-tall touch screen in landscape too.
+static const int kPopupButtonY0 = 44;
+static const int kPopupButtonStride = 37;
+// The new-selection row that adds or shows a character.
+static const int kCharacterOption = 3;
+// Longer selections aren't offered as a character name.
+static const size_t kMaxCharacterNameChars = 60;
 
 static const std::vector<WordBox> *CurrentPageWords(Book *book) {
   if (!book || book->GetPageCount() == 0 || book->IsFixedLayout())
@@ -171,7 +175,29 @@ enum class LookupAction : uint8_t { Dictionary, Online, FollowLink, Cancel };
 static int PopupOptionCount(const TextSelectionState &sel) {
   if (sel.popup == SelectionPopup::WordLookup)
     return sel.popup_link >= 0 ? 4 : 3;
+  if (sel.popup == SelectionPopup::ExistingHighlight)
+    return 4;
   return kMaxPopupOptions;
+}
+
+static bool CharacterNameFits(const std::string &name) {
+  return !name.empty() &&
+         annotation_text_utils::Utf8ToCodepoints(name).size() <=
+             kMaxCharacterNameChars;
+}
+
+static std::string CharacterLabel(const TextSelectionState &sel) {
+  if (!CharacterNameFits(sel.popup_word))
+    return "Character: select just a name";
+  if (!sel.popup_character_id)
+    return "Add as character";
+  std::vector<uint32_t> name =
+      annotation_text_utils::Utf8ToCodepoints(sel.popup_word);
+  std::string shown = annotation_text_utils::CodepointsToUtf8(
+      name, 0, std::min(name.size(), (size_t)16));
+  if (name.size() > 16)
+    shown += "...";
+  return "Mentions of " + shown;
 }
 
 static LookupAction LookupActionAt(const TextSelectionState &sel, int index) {
@@ -186,9 +212,9 @@ static LookupAction LookupActionAt(const TextSelectionState &sel, int index) {
 
 static std::string PopupLabel(const TextSelectionState &sel, int index) {
   static const char *kNew[kMaxPopupOptions] = {"Highlight", "Highlight + note",
-                                               NULL, "Cancel"};
+                                               NULL, NULL, "Cancel"};
   static const char *kExisting[kMaxPopupOptions] = {
-      "Edit note", NULL, "Delete highlight", "Cancel"};
+      "Edit note", NULL, "Delete highlight", "Cancel", NULL};
   if (index < 0 || index >= PopupOptionCount(sel))
     return "";
   if (sel.popup == SelectionPopup::WordLookup) {
@@ -203,6 +229,8 @@ static std::string PopupLabel(const TextSelectionState &sel, int index) {
       return "Cancel";
     }
   }
+  if (sel.popup == SelectionPopup::NewSelection && index == kCharacterOption)
+    return CharacterLabel(sel);
   if (index == ColorOption(sel.popup))
     return std::string("Color: ") + highlight_color_utils::Name(sel.popup_color) +
            "  < >";
@@ -551,6 +579,30 @@ static uint64_t HighlightUnderCursor(Book *book,
                                 (*words)[(size_t)sel.cursor].buf_begin);
 }
 
+// The selected text (normalized like a highlight's quote).
+static std::string SelectedText(Book *book, const TextSelectionState &sel) {
+  Page *page = book->GetPage(sel.popup_page);
+  if (!page || !page->GetBuffer())
+    return std::string();
+  std::string quote;
+  std::string prefix;
+  if (sel.popup_page != book->GetPosition()) {
+    Page *next = book->GetPage(sel.popup_page + 1);
+    if (!next || !next->GetBuffer() ||
+        !annotation_text_utils::BuildAnchorAcrossPages(
+            page->GetBuffer(), page->GetLength(), sel.popup_buf_begin,
+            next->GetBuffer(), next->GetLength(), sel.popup_buf_end,
+            kMaxCharacterNameChars + 1, 0, &quote, &prefix))
+      return std::string();
+  } else if (!annotation_text_utils::BuildAnchorFromBufferRange(
+                 page->GetBuffer(), page->GetLength(), sel.popup_buf_begin,
+                 sel.popup_buf_end, kMaxCharacterNameChars + 1, 0, &quote,
+                 &prefix)) {
+    return std::string();
+  }
+  return word_lookup_utils::CleanSelectedWord(quote);
+}
+
 static void OpenPopupForSelection(App &app, Book *book, Text *ts) {
   TextSelectionState &sel = app.MutableTextSelection();
   const std::vector<WordBox> *words = CurrentPageWords(book);
@@ -580,6 +632,12 @@ static void OpenPopupForSelection(App &app, Book *book, Text *ts) {
     sel.popup_color = app.prefs ? app.prefs->highlight_color : 0;
   } else {
     return;
+  }
+  if (sel.popup == SelectionPopup::NewSelection) {
+    sel.popup_word = SelectedText(book, sel);
+    sel.popup_character_id = CharacterNameFits(sel.popup_word)
+                                 ? book->FindCharacter(sel.popup_word)
+                                 : 0;
   }
   RedrawSelection(app, book, ts);
 }
@@ -864,6 +922,23 @@ static void RunPopupOption(App &app, Book *book, Text *ts, int option) {
         app.PrintStatus("Nothing to highlight");
       // The keyboard applet replaced both screens.
       ts->MarkAllScreensDirty();
+    } else if (option == kCharacterOption) {
+      if (!CharacterNameFits(sel.popup_word))
+        return;
+      uint64_t id = sel.popup_character_id;
+      if (!id)
+        id = book->AddCharacter(sel.popup_word);
+      if (!id)
+        return;
+      // Leave selection mode without redrawing the page: the character
+      // list replaces it, and the page is drawn again when it closes.
+      sel.ResetSelection();
+      word_lookup_panel::Hide();
+      s_pending_lookup = PendingLookup::None;
+      ReleasePageSnapshot();
+      book->SetWordCaptureEnabled(false);
+      app.ShowCharactersView(id);
+      return;
     } else {
       // Cancel keeps selection mode open so the range can be adjusted.
       sel.anchor = -1;

@@ -20,4 +20,5 @@ enum class AppMode : u8
   DeleteBook = 13,
   Readwise = 14,
   Hardcover = 15,
+  Characters = 16,
 };

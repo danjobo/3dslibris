@@ -220,6 +220,7 @@ App::App()
 
   fontmenu = std::unique_ptr<FontMenu>(new FontMenu(this));
   bookmarkmenu = std::unique_ptr<BookmarkMenu>(new BookmarkMenu(this));
+  charactermenu = std::unique_ptr<CharacterMenu>(new CharacterMenu(this));
   chaptermenu = std::unique_ptr<ChapterMenu>(new ChapterMenu(this));
 
 #ifdef DSLIBRIS_DEBUG

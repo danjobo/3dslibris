@@ -46,6 +46,7 @@ static const int kBookPrefsButtons[] = {
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
     PREFS_BUTTON_BOOKMARKS,
+    PREFS_BUTTON_CHARACTERS,
 };
 
 static const int kBookPrefsButtonsWithBookOption[] = {
@@ -56,6 +57,7 @@ static const int kBookPrefsButtonsWithBookOption[] = {
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
     PREFS_BUTTON_BOOKMARKS,
+    PREFS_BUTTON_CHARACTERS,
 };
 
 static const int kReflowBookPrefsPage2Buttons[] = {

@@ -247,6 +247,10 @@ int MainLoopController::RunMainLoop()
       app_.RunBookmarksMenuFrame(input);
       break;
 
+    case AppMode::Characters:
+      app_.RunCharactersMenuFrame(input);
+      break;
+
     case AppMode::Chapters:
       app_.RunChaptersMenuFrame(input);
       break;

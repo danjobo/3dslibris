@@ -96,6 +96,18 @@ Highlights & notes:
 - They are saved in `sdmc:/3ds/3dslibris/annotations/` and survive
   font size and layout changes and clearing the cache
 
+Characters:
+- Keep track of who's who: hold X, select a name (a full name or just a
+  surname), and choose "Add as character" in the menu
+- The character list shows each name with the first sentence it appears
+  in. Open it from that menu (the row reads "Mentions of ..." once a
+  name is saved), from BOOK settings > characters, or by pressing
+  SELECT twice quickly while reading
+- A on a name lists every mention up to the page you're on (nothing
+  ahead, so no spoilers), each with its sentence. A on a mention jumps
+  there; "Back to page N" at the top returns to where you were
+- X on a name, twice, removes it. Characters sync with another 3DS
+
 Word lookup:
 - Hold Y: enter word lookup (short Y press still toggles a bookmark)
 - Move the cursor as in selection mode (D-Pad, L / R, touch a word);

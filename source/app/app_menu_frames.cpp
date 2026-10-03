@@ -690,6 +690,19 @@ void App::RunBookmarksMenuFrame(const FrameInput &input)
     bookmarkmenu->Draw();
 }
 
+void App::RunCharactersMenuFrame(const FrameInput &input)
+{
+  if (charactermenu->NeedsPrepare()) {
+    charactermenu->Prepare();
+    charactermenu->Init();
+    charactermenu->Draw();
+    return;
+  }
+  charactermenu->HandleInput(input);
+  if (nav_.mode == AppMode::Characters && charactermenu->IsDirty())
+    charactermenu->Draw();
+}
+
 void App::RunChaptersMenuFrame(const FrameInput &input)
 {
   const u32 keys = input.keys_down;

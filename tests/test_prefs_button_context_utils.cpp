@@ -156,6 +156,8 @@ int main() {
       CheckDrawablePage(page);
       test::ExpectFalse("general preferences exclude bookmarks",
                         HasButton(page, PREFS_BUTTON_BOOKMARKS));
+      test::ExpectFalse("general preferences exclude characters",
+                        HasButton(page, PREFS_BUTTON_CHARACTERS));
       test::ExpectFalse("general preferences exclude book information",
                         HasButton(page, PREFS_BUTTON_BOOK_INFO));
     }
@@ -189,7 +191,8 @@ int main() {
       test::ExpectTrue("book navigation remains available",
                        HasButton(page, PREFS_BUTTON_BOOK_INFO) &&
                        HasButton(page, PREFS_BUTTON_INDEX) &&
-                       HasButton(page, PREFS_BUTTON_BOOKMARKS));
+                       HasButton(page, PREFS_BUTTON_BOOKMARKS) &&
+                       HasButton(page, PREFS_BUTTON_CHARACTERS));
       test::ExpectFalse("book page excludes global Circle Pad setting",
                         HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
       test::ExpectTrue("optional line-wrap slot is present only when requested",

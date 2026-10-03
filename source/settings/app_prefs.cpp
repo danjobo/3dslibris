@@ -292,12 +292,15 @@ void SettingsController::ShowSettingsView(bool from_book) {
   prefs_general_page_ = 0;
   go_to_page_dialog_.Close();
   app_.SetBookSettingsContext(from_book);
+  opened_from_book_ms_ =
+      from_book && app_.GetMode() == AppMode::Book ? osGetTime() : 0;
   app_.SetPrefsLayoutNoticePending(
       from_book && app_.GetCurrentBook() &&
       app_.BookNeedsRelayout(app_.GetCurrentBook()));
 
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  PrefsRefreshButton(PREFS_BUTTON_CHARACTERS);
   PrefsRefreshButton(PREFS_BUTTON_CLEAR_CACHE);
   PrefsRefreshButton(PREFS_BUTTON_EXPORT_HIGHLIGHTS);
   PrefsRefreshButton(PREFS_BUTTON_SYNC_DEVICES);
@@ -340,7 +343,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "Readwise", "sync with another 3DS", "publisher sides"};
+      "Readwise", "sync with another 3DS", "publisher sides", "characters"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -395,6 +398,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  PrefsRefreshButton(PREFS_BUTTON_CHARACTERS);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
@@ -551,6 +555,20 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
       PrefsDraw();
     return;
   }
+
+  // SELECT tapped twice from the reader: the character list.
+  static const u64 kSelectDoubleTapMs = 400;
+  if (book_ctx && (keys & KEY_SELECT) && opened_from_book_ms_ &&
+      input.timestamp_ms - opened_from_book_ms_ <= kSelectDoubleTapMs) {
+    opened_from_book_ms_ = 0;
+    Book *book = app_.GetCurrentBook();
+    if (book && book->SupportsAnnotations()) {
+      app_.ShowCharactersView();
+      return;
+    }
+  }
+  if (keys)
+    opened_from_book_ms_ = 0;
 
   if (keys & KEY_A) {
     PrefsHandlePress();
@@ -1052,6 +1070,16 @@ void SettingsController::PrefsRefreshButton(int index) {
                                 : std::string("(open selected book)"));
     }
     break;
+  case PREFS_BUTTON_CHARACTERS:
+    if (is_book_ctx && book && !book->SupportsAnnotations()) {
+      app_.prefsButtons[PREFS_BUTTON_CHARACTERS].SetLabel2(
+          std::string("(not for PDF/CBZ)"));
+    } else {
+      app_.prefsButtons[PREFS_BUTTON_CHARACTERS].SetLabel2(
+          (is_book_ctx && book) ? std::string("names and mentions >")
+                                : std::string("(open selected book)"));
+    }
+    break;
   case PREFS_BUTTON_RESET_DEFAULTS:
     app_.prefsButtons[PREFS_BUTTON_RESET_DEFAULTS].SetLabel2(std::string("restore defaults >"));
     break;
@@ -1329,6 +1357,16 @@ void SettingsController::PrefsHandlePress() {
       app_.PrintStatus("Index unavailable for this book");
       PrefsRefreshButton(PREFS_BUTTON_INDEX);
       app_.MarkPrefsDirty();
+    }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_CHARACTERS) {
+    if (is_book_ctx && book && book->SupportsAnnotations()) {
+      app_.ShowCharactersView();
+    } else if (!is_book_ctx && app_.GetSelectedBook() &&
+               !app_.GetSelectedBook()->IsBrowserFolder()) {
+      app_.OpenBook();
     }
     return;
   }
