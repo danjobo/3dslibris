@@ -3,11 +3,12 @@
 namespace status_layout_utils {
 
 struct BookStatusHudLayout {
-  int text_y;
+  int text_y; // baselines, like every pen y
   int clear_top;
   int clear_bottom;
   int progress_bar_y;
   int progress_bar_height;
+  int eta_y; // the time-remaining line, below the progress bar
 };
 
 struct FixedLayoutBottomHudLayout {
@@ -48,6 +49,20 @@ inline BookStatusHudLayout ComputeBookStatusHudLayout(int screen_height,
     const int shift = progress_bottom - max_progress_bottom;
     layout.text_y -= shift;
     layout.progress_bar_y -= shift;
+  }
+
+  // The time-remaining line goes under the bar: its glyphs (about 3/4 of
+  // the font height above the baseline) start a pixel below it. A tall
+  // font that would run off the screen moves the whole row up.
+  const int ascent = (font_height * 3 + 3) / 4;
+  layout.eta_y =
+      layout.progress_bar_y + layout.progress_bar_height + 1 + ascent;
+  const int max_eta_y = screen_height - 1;
+  if (layout.eta_y > max_eta_y) {
+    const int shift = layout.eta_y - max_eta_y;
+    layout.text_y -= shift;
+    layout.progress_bar_y -= shift;
+    layout.eta_y -= shift;
   }
 
   const int reserved_top = screen_height - footer_reserved_height;

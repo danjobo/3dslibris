@@ -382,7 +382,7 @@ void StatusController::UpdateStatus()
           char eta_bk[24];
           if (FormatEtaPair(eta_ch, sizeof(eta_ch), eta_bk, sizeof(eta_bk),
                             current_book)) {
-            const int etaY = hud_layout.clear_bottom - app_.ts->GetHeight() - 1;
+            const int etaY = hud_layout.eta_y;
             const int eta_bk_w =
                 app_.ts->GetStringWidth(eta_bk, TEXT_STYLE_BROWSER);
             app_.ts->SetPen(8, etaY);

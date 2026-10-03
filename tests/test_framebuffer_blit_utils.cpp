@@ -362,6 +362,24 @@ void TestTopScreenLeavesBottomPadding() {
   ExpectEq("clear band ends at screen bottom", layout.clear_bottom, 400);
 }
 
+void TestEtaLineBelowProgressBar() {
+  for (int font_height = 10; font_height <= 22; font_height++) {
+    status_layout_utils::BookStatusHudLayout layout =
+        status_layout_utils::ComputeBookStatusHudLayout(400, font_height, 36);
+    const int bar_bottom = layout.progress_bar_y + layout.progress_bar_height;
+    const int eta_top = layout.eta_y - (font_height * 3 + 3) / 4;
+    ExpectTrue("time remaining starts below the progress bar",
+               eta_top > bar_bottom);
+    ExpectTrue("time remaining baseline on screen", layout.eta_y < 400);
+    ExpectEq("pagination's clear band unchanged", layout.clear_top, 364);
+  }
+  // The usual 12 px HUD keeps its clock row and bar where they were.
+  status_layout_utils::BookStatusHudLayout layout =
+      status_layout_utils::ComputeBookStatusHudLayout(400, 12, 36);
+  ExpectEq("clock row unchanged", layout.text_y, 375);
+  ExpectEq("bar unchanged", layout.progress_bar_y, 379);
+}
+
 void TestShorterScreenStillFits() {
   status_layout_utils::BookStatusHudLayout layout =
       status_layout_utils::ComputeBookStatusHudLayout(
@@ -410,6 +428,7 @@ int main() {
   TestOrientationPredicates();
   TestFixedLayoutTargetDimensions();
   TestTopScreenLeavesBottomPadding();
+  TestEtaLineBelowProgressBar();
   TestShorterScreenStillFits();
   TestFixedLayoutBottomOverlayFits();
   TestLandscapeBookHudUsesSlimBottomStrip();
