@@ -194,7 +194,7 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   u16 *savedScreen = app->ts->GetScreen();
 
   app->ts->SetStyle(TEXT_STYLE_BROWSER);
-  app->ts->PrintSplash(app->ts->screenleft);
+  app->ts->PrintSplash(app->ts->screenleft, selected->IsFixedLayout());
 
   app->ts->SetScreen(app->ts->screenright);
   app->ts->ClearScreen();

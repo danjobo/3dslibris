@@ -160,7 +160,8 @@ public:
   bool PrintNewLine(void);
   void PrintString(const char *string);
   void PrintString(const char *string, u8 style);
-  void PrintSplash(u16 *screen);
+  // fixed_layout: the PDF/CBZ controls splash instead of the reader's.
+  void PrintSplash(u16 *screen, bool fixed_layout = false);
 
 private:
   friend class FontManager;

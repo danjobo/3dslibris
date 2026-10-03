@@ -282,7 +282,9 @@ void Text::PrintString(const char *string, u8 style) {
   tr->PrintString(string, style);
 }
 
-void Text::PrintSplash(u16 *s) { tr->PrintSplash(s); }
+void Text::PrintSplash(u16 *s, bool fixed_layout) {
+  tr->PrintSplash(s, fixed_layout);
+}
 
 u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
   if (!utf8 || !ucs || !utf8[0])

@@ -60,7 +60,8 @@ public:
 
   bool BlitToFramebuffer();
 
-  void PrintSplash(u16 *screen);
+  // fixed_layout: the PDF/CBZ controls splash instead of the reader's.
+  void PrintSplash(u16 *screen, bool fixed_layout = false);
 
   int GetDisplayWidth() const;
   int GetDisplayHeight() const;
@@ -106,6 +107,7 @@ private:
   bool splash_dark_attempted;
   bool splash_dark_loaded;
   u16 *splash_dark_pixels;
+  bool splash_fixed_layout; // which splash the cached pixels are
 
   int stats_hits;
   int stats_misses;
@@ -114,5 +116,6 @@ private:
   float script_scale_;
 
   bool EnsureSplashLoaded(bool dark);
+  void ResetSplashCache();
   void DrawFallbackSplash();
 };

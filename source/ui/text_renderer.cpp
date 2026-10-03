@@ -62,7 +62,7 @@ TextRenderer::TextRenderer(Text *owner)
       hit(false), justify(false), colorMode(0), splash_light_attempted(false),
       splash_light_loaded(false), splash_light_pixels(nullptr),
       splash_dark_attempted(false), splash_dark_loaded(false),
-      splash_dark_pixels(nullptr), stats_hits(0), stats_misses(0),
+      splash_dark_pixels(nullptr), splash_fixed_layout(false), stats_hits(0), stats_misses(0),
       auto_wrap_enabled(true), clip_to_content_enabled(false), script_scale_(1.0f) {
   pen.x = 0;
   pen.y = 0;
@@ -91,17 +91,20 @@ void TextRenderer::GetPen(u16 &x, u16 &y) {
 void TextRenderer::SetColorMode(int state) {
   int old_dark = (colorMode == 1 || colorMode == 4 || colorMode == 5) ? 1 : 0;
   int new_dark = (state == 1 || state == 4 || state == 5) ? 1 : 0;
-  if (old_dark != new_dark) {
-    delete[] splash_light_pixels;
-    splash_light_pixels = nullptr;
-    splash_light_attempted = false;
-    splash_light_loaded = false;
-    delete[] splash_dark_pixels;
-    splash_dark_pixels = nullptr;
-    splash_dark_attempted = false;
-    splash_dark_loaded = false;
-  }
+  if (old_dark != new_dark)
+    ResetSplashCache();
   colorMode = state;
+}
+
+void TextRenderer::ResetSplashCache() {
+  delete[] splash_light_pixels;
+  splash_light_pixels = nullptr;
+  splash_light_attempted = false;
+  splash_light_loaded = false;
+  delete[] splash_dark_pixels;
+  splash_dark_pixels = nullptr;
+  splash_dark_attempted = false;
+  splash_dark_loaded = false;
 }
 
 int TextRenderer::GetColorMode() { return colorMode; }
@@ -394,7 +397,7 @@ bool TextRenderer::EnsureSplashLoaded(bool dark) {
 
   const std::string sdmc_resource_dir = paths::GetResourceDir();
   const std::vector<std::string> splash_paths = paths::GetSplashPathList();
-  const std::vector<std::string> candidates = dark
+  std::vector<std::string> candidates = dark
       ? std::vector<std::string>{
             "romfs:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
             sdmc_resource_dir + "/3DSLibris_dark_small.jpg",
@@ -405,6 +408,14 @@ bool TextRenderer::EnsureSplashLoaded(bool dark) {
             splash_paths[0],
             splash_paths[1],
         };
+  if (splash_fixed_layout) {
+    // The PDF/CBZ controls; the reader's splash if they're missing.
+    const char *name =
+        dark ? "/3DSLibris_dark_fixed.jpg" : "/3DSLibris_light_fixed.jpg";
+    candidates.insert(candidates.begin(), sdmc_resource_dir + name);
+    candidates.insert(candidates.begin(),
+                      std::string("romfs:/3ds/3dslibris/resources") + name);
+  }
 
   int srcW = 0;
   int srcH = 0;
@@ -502,9 +513,13 @@ void TextRenderer::DrawFallbackSplash() {
   SetStyle(savedStyle);
 }
 
-void TextRenderer::PrintSplash(u16 *screen) {
+void TextRenderer::PrintSplash(u16 *screen, bool fixed_layout) {
   auto s = GetScreen();
   int savedColorMode = GetColorMode();
+  if (fixed_layout != splash_fixed_layout) {
+    ResetSplashCache();
+    splash_fixed_layout = fixed_layout;
+  }
 
   SetScreen(screen);
   ClearScreen();

@@ -449,7 +449,11 @@ void SettingsController::PrefsDraw() {
     }
   }
 
-  ts->PrintSplash(ts->screenleft);
+  // The controls for the open book's kind (PDF/CBZ or reflowable).
+  Book *splash_book = app_.IsBookSettingsContext() ? app_.GetCurrentBook()
+                                                   : NULL;
+  ts->PrintSplash(ts->screenleft,
+                  splash_book && splash_book->IsFixedLayout());
   if (app_.IsBookSettingsContext() && app_.IsPrefsLayoutNoticePending() &&
       app_.GetCurrentBook() && app_.BookNeedsRelayout(app_.GetCurrentBook())) {
     const u8 savedPixelSize = ts->GetPixelSize();
