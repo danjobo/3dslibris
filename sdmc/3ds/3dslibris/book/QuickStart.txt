@@ -84,6 +84,7 @@ Highlights & notes:
   the page turns and the selection carries on (moving back before the
   first word returns to the previous page)
 - After selecting, choose Highlight, Highlight + note, or Cancel
+  (Cancel goes back to the cursor; B in that menu goes back to the page)
 - Colors: in that menu, D-Pad Left/Right (or the Color row) picks
   yellow, green, blue, pink or purple. New highlights use the last
   color you chose
@@ -109,7 +110,7 @@ Word lookup:
   with links to the pages. Needs Wi-Fi; takes a few seconds
 - In the definition: D-Pad up/down to scroll, left/right or L / R a
   screen at a time (or touch the upper/lower half); A switches between
-  the dictionary and online; B goes back to the word cursor
+  the dictionary and online; B goes back to the page
 
 Syncing with another 3DS (Wi-Fi or local wireless):
 - Both consoles need 3dslibris and the same connection type. "connection"

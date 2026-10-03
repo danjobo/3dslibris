@@ -950,7 +950,7 @@ static int TouchedWord(App &app, Book *book, Text *ts,
 
 // One frame while the lookup panel is shown: runs a pending lookup, and
 // otherwise scrolls (D-pad, L/R, touch the upper or lower half), switches
-// source (A) or goes back to the word cursor (B).
+// source (A) or goes back to the page (B).
 static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
                                    const FrameInput &input) {
   using text_selection_utils::ScreenDirection;
@@ -970,9 +970,7 @@ static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
   const ScreenDirection held_dir = PressedDirection(app, book, held);
   const uint64_t now_ms = input.timestamp_ms;
   if (keys & app.key.b) {
-    word_lookup_panel::Hide();
-    sel.popup = SelectionPopup::None;
-    RedrawSelection(app, book, ts);
+    ExitSelectionMode(app, book, ts);
     return;
   }
   if (keys & app.key.a) {
@@ -1041,7 +1039,8 @@ static bool HandleSelectionInput(App &app, Book *book, Text *ts,
     if (keys & app.key.a) {
       RunPopupOption(app, book, ts, sel.popup_index);
     } else if (keys & app.key.b) {
-      ClosePopup(app, book, ts);
+      // Straight back to the page; Cancel returns to the cursor instead.
+      ExitSelectionMode(app, book, ts);
     } else if (pressed == ScreenDirection::Up ||
                pressed == ScreenDirection::Down) {
       sel.popup_index = text_selection_utils::StepPopupIndex(
