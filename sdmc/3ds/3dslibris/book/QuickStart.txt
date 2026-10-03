@@ -109,7 +109,8 @@ Word lookup:
 - Look up online: Wiktionary's definitions and the Wikipedia summary,
   with links to the pages. Needs Wi-Fi; takes a few seconds
 - In the definition: D-Pad up/down to scroll, left/right or L / R a
-  screen at a time (or touch the upper/lower half); A switches between
+  screen at a time; or drag it with your finger (a tap on the upper or
+  lower half moves a screen); A switches between
   the dictionary and online; B goes back to the page
 
 Syncing with another 3DS (Wi-Fi or local wireless):

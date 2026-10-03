@@ -34,6 +34,13 @@ bool IsVisible();
 // False if it was already at that end.
 bool Scroll(Text *ts, int amount, bool pages);
 
+// First line shown, and moving it there directly (clamped; false if it
+// didn't change). For dragging with a finger.
+int Top();
+bool ScrollTo(Text *ts, int top);
+// Height of one text line, in touch screen pixels.
+int RowHeightPx(Text *ts);
+
 // Paints the panel into ts->screenright.
 void Draw(Text *ts);
 

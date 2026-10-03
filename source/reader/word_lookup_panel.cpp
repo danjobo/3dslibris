@@ -122,21 +122,36 @@ void Hide() {
 
 bool IsVisible() { return s_panel.visible; }
 
-bool Scroll(Text *ts, int amount, bool pages) {
+static int VisibleLinesNow(Text *ts) {
+  TextStateScope scope(ts);
+  return VisibleLines(ts);
+}
+
+bool ScrollTo(Text *ts, int top) {
   if (!s_panel.visible)
     return false;
-  int visible = 1;
-  {
-    TextStateScope scope(ts);
-    visible = VisibleLines(ts);
-  }
-  const int step = pages ? amount * std::max(1, visible - 1) : amount;
-  const int max_top = std::max(0, (int)s_panel.lines.size() - visible);
-  const int top = std::max(0, std::min(max_top, s_panel.top + step));
+  const int max_top =
+      std::max(0, (int)s_panel.lines.size() - VisibleLinesNow(ts));
+  top = std::max(0, std::min(max_top, top));
   if (top == s_panel.top)
     return false;
   s_panel.top = top;
   return true;
+}
+
+bool Scroll(Text *ts, int amount, bool pages) {
+  if (!s_panel.visible)
+    return false;
+  const int step =
+      pages ? amount * std::max(1, VisibleLinesNow(ts) - 1) : amount;
+  return ScrollTo(ts, s_panel.top + step);
+}
+
+int Top() { return s_panel.top; }
+
+int RowHeightPx(Text *ts) {
+  TextStateScope scope(ts);
+  return RowHeight(ts);
 }
 
 void Draw(Text *ts) {

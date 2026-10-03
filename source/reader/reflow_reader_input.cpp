@@ -434,6 +434,14 @@ enum class PanelSource : uint8_t { Dictionary, Online };
 enum class PendingLookup : uint8_t { None, Dictionary, Online };
 static PendingLookup s_pending_lookup = PendingLookup::None;
 static PanelSource s_panel_source = PanelSource::Dictionary;
+// A finger on the lookup panel: where it went down and the first line shown
+// then. It scrolls with the finger once it has moved kPanelDragSlopPx; a
+// tap without moving pages up or down instead.
+static const int kPanelDragSlopPx = 6;
+static bool s_panel_drag_active = false;
+static bool s_panel_drag_moved = false;
+static int s_panel_drag_start_y = 0;
+static int s_panel_drag_start_top = 0;
 
 static void ExitSelectionMode(App &app, Book *book, Text *ts) {
   app.MutableTextSelection().ResetSelection();
@@ -702,6 +710,7 @@ static void ShowLookupPanel(App &app, Book *book, Text *ts,
                             PanelSource source) {
   const TextSelectionState &sel = app.MutableTextSelection();
   s_panel_source = source;
+  s_panel_drag_active = false;
   const char *footer = source == PanelSource::Dictionary
                            ? "A: look up online   B: back"
                            : "A: dictionary   B: back";
@@ -949,8 +958,8 @@ static int TouchedWord(App &app, Book *book, Text *ts,
 }
 
 // One frame while the lookup panel is shown: runs a pending lookup, and
-// otherwise scrolls (D-pad, L/R, touch the upper or lower half), switches
-// source (A) or goes back to the page (B).
+// otherwise scrolls (D-pad, L/R, dragging a finger, or tapping the upper or
+// lower half), switches source (A) or goes back to the page (B).
 static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
                                    const FrameInput &input) {
   using text_selection_utils::ScreenDirection;
@@ -985,6 +994,36 @@ static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
     return;
   }
   bool moved = false;
+  if (keys & KEY_TOUCH) {
+    s_panel_drag_active = true;
+    s_panel_drag_moved = false;
+    s_panel_drag_start_y = app.MapTouch(input).py;
+    s_panel_drag_start_top = word_lookup_panel::Top();
+    return;
+  }
+  if (s_panel_drag_active) {
+    if (held & KEY_TOUCH) {
+      const int dy = (int)app.MapTouch(input).py - s_panel_drag_start_y;
+      if (dy >= kPanelDragSlopPx || dy <= -kPanelDragSlopPx)
+        s_panel_drag_moved = true;
+      if (s_panel_drag_moved) {
+        const int row = std::max(1, word_lookup_panel::RowHeightPx(ts));
+        // Content follows the finger: dragging up shows later lines.
+        moved = word_lookup_panel::ScrollTo(ts, s_panel_drag_start_top -
+                                                    dy / row);
+      }
+    } else {
+      s_panel_drag_active = false;
+      if (!s_panel_drag_moved)
+        moved = word_lookup_panel::Scroll(
+            ts,
+            s_panel_drag_start_y < ts->LogicalHeightFor(false) / 2 ? -1 : 1,
+            true);
+    }
+    if (moved)
+      RedrawSelection(app, book, ts);
+    return;
+  }
   if (keys & app.key.l) {
     moved = word_lookup_panel::Scroll(ts, -1, true);
   } else if (keys & app.key.r) {
@@ -999,10 +1038,6 @@ static void HandleLookupPanelInput(App &app, Book *book, Text *ts,
              pressed == ScreenDirection::Right) {
     moved = word_lookup_panel::Scroll(
         ts, pressed == ScreenDirection::Left ? -1 : 1, true);
-  } else if (keys & KEY_TOUCH) {
-    const touchPosition mapped = app.MapTouch(input);
-    moved = word_lookup_panel::Scroll(
-        ts, (int)mapped.py < ts->LogicalHeightFor(false) / 2 ? -1 : 1, true);
   } else if (held_dir != ScreenDirection::None &&
              held_dir == sel.repeat_direction && now_ms >= sel.repeat_next_ms) {
     sel.repeat_next_ms = now_ms + kCursorRepeatIntervalMs;
