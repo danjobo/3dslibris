@@ -33,7 +33,7 @@ std::string PageLabel(int page) {
 } // namespace
 
 CharacterMenu::CharacterMenu(App *app)
-    : PagedListMenu(app, "characters"), level_(kList), prepared_(true),
+    : PagedListMenu(app, "mentions"), level_(kList), prepared_(true),
       opened_on_mentions_(false), open_id_(0), character_(-1),
       origin_book_(NULL), origin_page_(0), remove_armed_id_(0),
       jump_active_(false), jump_mention_(0) {}
@@ -157,8 +157,8 @@ void CharacterMenu::BuildEntries(Book *book, Text *text,
     return;
   }
 
-  SetHeaderTitle(remove_armed_id_ ? "characters  X again: remove"
-                                  : "characters  X:remove");
+  SetHeaderTitle(remove_armed_id_ ? "mentions  X again: remove"
+                                  : "mentions  X:remove");
   for (size_t i = 0; i < characters_.size(); i++) {
     const std::vector<character_utils::Mention> &list = mentions_[i];
     std::string label = characters_[i].quote + "  (" +
@@ -171,7 +171,7 @@ void CharacterMenu::BuildEntries(Book *book, Text *text,
     rows_.push_back(row);
   }
   if (characters_.empty()) {
-    labels.push_back("No characters yet\nHold X on a name, select it, and\nchoose \"Add as character\".");
+    labels.push_back("Nothing tracked yet\nHold X on a name or word, select\nit, and choose \"Track mentions\".");
     pages.push_back((u16)current);
     Row row = {kEmptyRow, 0};
     rows_.push_back(row);
@@ -239,7 +239,7 @@ void CharacterMenu::HandleInput(const FrameInput &input) {
         Init();
       } else {
         remove_armed_id_ = id;
-        SetHeaderTitle("characters  X again: remove");
+        SetHeaderTitle("mentions  X again: remove");
         SetDirty();
       }
     }
@@ -247,7 +247,7 @@ void CharacterMenu::HandleInput(const FrameInput &input) {
   }
   if (remove_armed_id_ && (keys & ~KEY_X)) {
     remove_armed_id_ = 0;
-    SetHeaderTitle("characters  X:remove");
+    SetHeaderTitle("mentions  X:remove");
     SetDirty();
   }
   PagedListMenu::HandleInput(input);

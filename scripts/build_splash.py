@@ -172,7 +172,7 @@ def draw_reader(theme_name):
     y = 203
     x = p.round_key(20, y, "X") + 6
     p.text((x, y - 7), "Change colors", BOLD)
-    p.text((x, y + 7), "hold: highlight, notes, characters", REG)
+    p.text((x, y + 7), "hold: highlight, notes, mentions", REG)
     p.rule(y + 20)
 
     y = 240
@@ -189,7 +189,7 @@ def draw_reader(theme_name):
     p.text((x, y + 11), "leave", REG)
     p.text((14, y + 30), "D-pad moves the cursor", SMALL, "soft")
 
-    footer(p, "twice: characters")
+    footer(p, "twice: mentions")
     return img
 
 

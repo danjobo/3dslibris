@@ -188,9 +188,9 @@ static bool CharacterNameFits(const std::string &name) {
 
 static std::string CharacterLabel(const TextSelectionState &sel) {
   if (!CharacterNameFits(sel.popup_word))
-    return "Character: select just a name";
+    return "Mentions: select a shorter name";
   if (!sel.popup_character_id)
-    return "Add as character";
+    return "Track mentions";
   std::vector<uint32_t> name =
       annotation_text_utils::Utf8ToCodepoints(sel.popup_word);
   std::string shown = annotation_text_utils::CodepointsToUtf8(

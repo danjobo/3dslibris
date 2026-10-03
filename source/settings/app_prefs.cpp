@@ -343,7 +343,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks & notes",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "Readwise", "sync with another 3DS", "publisher sides", "characters"};
+      "Readwise", "sync with another 3DS", "publisher sides", "mentions"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -1080,7 +1080,7 @@ void SettingsController::PrefsRefreshButton(int index) {
           std::string("(not for PDF/CBZ)"));
     } else {
       app_.prefsButtons[PREFS_BUTTON_CHARACTERS].SetLabel2(
-          (is_book_ctx && book) ? std::string("names and mentions >")
+          (is_book_ctx && book) ? std::string("names and terms >")
                                 : std::string("(open selected book)"));
     }
     break;

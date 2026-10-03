@@ -30,7 +30,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Global and per-book controls for font size, spacing, and EPUB publisher layout.
 - Reading progress and bookmarks saved across library folders, with an option to reopen the last book on startup.
 - Highlights (five colors, including across a page break) and notes in reflowable books, listed with bookmarks for quick jumps and kept across font and layout changes. Upload them to Readwise over Wi-Fi, or export a CSV for its import.
-- A character list for books with a big cast: select a name (hold `X` > Add as character) and see where each one first appeared and every later mention up to your page, with the sentence around it; jump to one and back.
+- Mentions, for books with a big cast: select a name or term (hold `X` > Track mentions) and see where each one first appeared and every later mention up to your page, with the sentence around it; jump to one and back.
 - Word lookup in reflowable books: hold `Y`, pick a word, and read its definition from the bundled English dictionary (WordNet) or any StarDict dictionary you add, or look it up online (Wiktionary and the Wikipedia summary).
 - Track reading progress on Hardcover: link a book once and progress (and finishing it) is sent when you leave the book.
 - Sync reading positions, bookmarks, highlights and notes with another 3DS over Wi-Fi or local wireless (host / join with a pairing code), and copy books only one console has.
@@ -103,7 +103,7 @@ Standard reading:
 - `D-Pad Left` / `D-Pad Right`: jump between bookmarks
 - `Y`: toggle bookmark; hold `Y` to look up a word (D-Pad or touch to pick it, `A` for Dictionary / Look up online, or Follow link when the word is a link). Inline links can also be followed by touching them.
 - `X`: change background color; hold `X` to select text, then `A` to highlight it or add a note (D-Pad or touch drag to select)
-- `SELECT`: open `BOOK` settings (highlights and notes are listed under "bookmarks & notes"); press it twice quickly for the character list
+- `SELECT`: open `BOOK` settings (highlights and notes are listed under "bookmarks & notes"); press it twice quickly for mentions
 - `START`: return to library
 
 Fixed-layout documents (`PDF` / `CBZ` / `XPS`):
