@@ -12,6 +12,7 @@ static const char *kHeaderV1 = "3DSLIBRIS-ANNOTATIONS 1";
 static const char *kHeaderV2 = "3DSLIBRIS-BOOKSTATE 2";
 static const char *kHeaderV3 = "3DSLIBRIS-BOOKSTATE 3";
 static const char *kHeaderV4 = "3DSLIBRIS-BOOKSTATE 4";
+static const char *kHeaderV5 = "3DSLIBRIS-BOOKSTATE 5";
 static const size_t kMaxFileBytes = 4 * 1024 * 1024;
 
 void SplitTabs(const std::string &line, std::vector<std::string> *fields) {
@@ -97,10 +98,10 @@ bool ParseV1Line(const std::vector<std::string> &f, uint32_t console_prefix,
 // v2 H/B: kind id created modified deleted page_hint page_count_hint quote
 //         prefix note
 // v2 records have 10 fields; v3 adds the highlight color, v4 the Readwise
-// upload state.
+// upload state, v5 the C (character) kind. Unknown kinds are skipped.
 bool ParseV2Record(const std::vector<std::string> &f, Annotation *a) {
   if ((f.size() != 10 && f.size() != 11 && f.size() != 13) ||
-      (f[0] != "H" && f[0] != "B"))
+      (f[0] != "H" && f[0] != "B" && f[0] != "C"))
     return false;
   unsigned long color = 0;
   if (f.size() >= 11 && !ParseU32(f[10], 0xFFUL, &color))
@@ -123,7 +124,9 @@ bool ParseV2Record(const std::vector<std::string> &f, Annotation *a) {
       !ParseU32(f[4], 1, &deleted) || !ParseU32(f[5], 0xFFFFUL, &page) ||
       !ParseU32(f[6], 0xFFFFUL, &count))
     return false;
-  a->kind = f[0] == "H" ? Annotation::kHighlight : Annotation::kBookmark;
+  a->kind = f[0] == "H"   ? Annotation::kHighlight
+            : f[0] == "C" ? Annotation::kCharacter
+                          : Annotation::kBookmark;
   a->created = (uint32_t)created;
   a->modified = (uint32_t)modified;
   a->deleted = deleted != 0;
@@ -132,9 +135,9 @@ bool ParseV2Record(const std::vector<std::string> &f, Annotation *a) {
   a->quote = UnescapeField(f[7]);
   a->prefix = UnescapeField(f[8]);
   a->note = UnescapeField(f[9]);
-  // A live highlight needs text to anchor; bookmarks in fixed-layout books
-  // and tombstones may have none.
-  return !(a->kind == Annotation::kHighlight && !a->deleted &&
+  // A live highlight needs text to anchor and a live character a name;
+  // bookmarks in fixed-layout books and tombstones may have none.
+  return !(a->kind != Annotation::kBookmark && !a->deleted &&
            a->quote.empty());
 }
 
@@ -211,7 +214,7 @@ std::string UnescapeField(const std::string &in) {
 }
 
 std::string Serialize(const BookState &state) {
-  std::string out = kHeaderV4;
+  std::string out = kHeaderV5;
   out.push_back('\n');
   if (state.has_progress) {
     const ReadingProgress &p = state.progress;
@@ -279,8 +282,9 @@ bool Parse(const std::string &data, uint32_t console_prefix, BookState *out) {
     if (version == 0) {
       if (line == kHeaderV1)
         version = 1;
-      else if (line == kHeaderV2 || line == kHeaderV3 || line == kHeaderV4)
-        version = 2; // v3/v4 records are v2 records plus trailing fields
+      else if (line == kHeaderV2 || line == kHeaderV3 || line == kHeaderV4 ||
+               line == kHeaderV5)
+        version = 2; // v3-v5 records are v2 records plus trailing fields
       else
         return false;
       continue;

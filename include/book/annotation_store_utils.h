@@ -5,14 +5,16 @@
     per book under paths::GetAnnotationsDir() (deliberately outside the cache
     directory, which "clear cache" deletes).
 
-    Format v4: a header line, then one record per line, tab-separated:
+    Format v5: a header line, then one record per line, tab-separated:
       H <id hex> <created> <modified> <deleted 0|1> <page_hint>
         <page_count_hint> <quote> <prefix> <note> <color>
         <readwise_uploaded> <readwise_id hex>               (highlight)
       B ...same fields, note empty, the rest 0...           (bookmark)
+      C ...same fields, quote = the name, the rest empty/0  (character)
       P <last_read> <page_hint> <page_count_hint> <quote> <prefix>
     Backslash, tab, CR and LF inside text fields are escaped as \\ \t \r \n.
 
+    Version 4 files are the same without C records.
     Version 3 files (no Readwise fields) and version 2 files (no color
     either) still load: yellow, not uploaded.
     Version 1 files (highlights only, small per-book ids) still load; their

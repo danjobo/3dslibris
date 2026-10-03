@@ -2,8 +2,8 @@
     3dslibris - annotation.h
 
     Per-book reading state that survives re-layout and can be synced between
-    consoles: highlights (with optional notes), bookmarks and the reading
-    position.
+    consoles: highlights (with optional notes), bookmarks, saved character
+    names and the reading position.
 
     Records are anchored by quoted text (plus a little preceding context),
     not by page index or buffer offset: both change whenever font size,
@@ -20,7 +20,9 @@
 #include <vector>
 
 struct Annotation {
-  enum Kind : char { kHighlight = 'H', kBookmark = 'B' };
+  // kCharacter: a name the reader is tracking; quote holds the name and
+  // nothing else is used (it isn't anchored to a page).
+  enum Kind : char { kHighlight = 'H', kBookmark = 'B', kCharacter = 'C' };
 
   // Unique across consoles: high 32 bits identify the console that created
   // the record, low 32 bits count records it created for this book.
@@ -49,6 +51,7 @@ struct Annotation {
 
   bool IsLiveHighlight() const { return kind == kHighlight && !deleted; }
   bool IsLiveBookmark() const { return kind == kBookmark && !deleted; }
+  bool IsLiveCharacter() const { return kind == kCharacter && !deleted; }
 };
 
 // Where the reader is in the book, and when they last moved there.

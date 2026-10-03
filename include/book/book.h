@@ -524,6 +524,18 @@ public:
   bool SetReadwiseState(uint64_t id, uint32_t uploaded, uint64_t readwise_id);
   //! Leaves a tombstone so the deletion syncs.
   bool RemoveAnnotation(uint64_t id);
+  //! Saved character names (live kCharacter records), oldest first.
+  std::vector<Annotation> GetCharacters();
+  //! The live character with this name (ignoring case and spacing), or 0.
+  uint64_t FindCharacter(const std::string &name);
+  //! Saves a character name; an existing one with the same name is reused.
+  //! Returns its id, or 0 for an empty name.
+  uint64_t AddCharacter(const std::string &name);
+  //! Leaves a tombstone so the deletion syncs.
+  bool RemoveCharacter(uint64_t id);
+  //! Page text for searches over the whole book (null if not loaded).
+  static bool PageBufferForSearch(void *book, int page, const uint32_t **buf,
+                                  int *len);
   //! Page where the highlight currently starts, or -1 if it can't be found.
   int GetAnnotationPage(uint64_t id);
   void CollectHighlightRanges(const Page *page,

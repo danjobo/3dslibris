@@ -14,6 +14,7 @@
 #include <time.h>
 
 #include "book/annotation_store_utils.h"
+#include "book/character_utils.h"
 #include "book/highlight_color_utils.h"
 #include "book/page.h"
 #include "shared/console_id.h"
@@ -210,6 +211,65 @@ bool Book::RemoveAnnotation(uint64_t id) {
     return true;
   }
   return false;
+}
+
+std::vector<Annotation> Book::GetCharacters() {
+  EnsureAnnotationsLoaded();
+  std::vector<Annotation> out;
+  for (size_t i = 0; i < state_.records.size(); i++)
+    if (state_.records[i].IsLiveCharacter())
+      out.push_back(state_.records[i]);
+  return out;
+}
+
+uint64_t Book::FindCharacter(const std::string &name) {
+  EnsureAnnotationsLoaded();
+  const std::string key = character_utils::NameKey(name);
+  if (key.empty())
+    return 0;
+  for (size_t i = 0; i < state_.records.size(); i++) {
+    const Annotation &a = state_.records[i];
+    if (a.IsLiveCharacter() && character_utils::NameKey(a.quote) == key)
+      return a.id;
+  }
+  return 0;
+}
+
+uint64_t Book::AddCharacter(const std::string &name) {
+  if (character_utils::NameKey(name).empty())
+    return 0;
+  const uint64_t existing = FindCharacter(name);
+  if (existing)
+    return existing;
+  Annotation a;
+  a.id = annotation_store_utils::NextId(state_, console_id::Prefix());
+  a.kind = Annotation::kCharacter;
+  a.created = Now();
+  a.modified = a.created;
+  a.quote = name;
+  state_.records.push_back(a);
+  SaveAnnotations();
+  return a.id;
+}
+
+bool Book::RemoveCharacter(uint64_t id) {
+  EnsureAnnotationsLoaded();
+  for (size_t i = 0; i < state_.records.size(); i++) {
+    Annotation &a = state_.records[i];
+    if (a.id != id || !a.IsLiveCharacter())
+      continue;
+    a.deleted = true;
+    a.modified = Now();
+    a.quote.clear();
+    SaveAnnotations();
+    return true;
+  }
+  return false;
+}
+
+bool Book::PageBufferForSearch(void *book, int page, const uint32_t **buf,
+                               int *len) {
+  return PageBufferForAnchor(book, page, buf, len);
 }
 
 namespace {

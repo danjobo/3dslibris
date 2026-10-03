@@ -157,8 +157,8 @@ void TestColors() {
   state.records.push_back(green);
   state.records.push_back(purple);
   const std::string text = annotation_store_utils::Serialize(state);
-  test::ExpectTrue("written as v4",
-                   text.compare(0, 21, "3DSLIBRIS-BOOKSTATE 4") == 0);
+  test::ExpectTrue("written as v5",
+                   text.compare(0, 21, "3DSLIBRIS-BOOKSTATE 5") == 0);
   BookState out;
   test::ExpectTrue("parsed",
                    annotation_store_utils::Parse(text, kConsoleA, &out));
@@ -271,6 +271,48 @@ void TestFileRoundTrip() {
     fclose(fp);
 }
 
+void TestCharacters() {
+  BookState state;
+  Annotation c;
+  c.id = IdOf(kConsoleA, 7);
+  c.kind = Annotation::kCharacter;
+  c.created = c.modified = 1700000000;
+  c.quote = "Sergeant Hughes";
+  state.records.push_back(c);
+  Annotation gone = c;
+  gone.id = IdOf(kConsoleB, 2);
+  gone.deleted = true;
+  gone.quote.clear();
+  state.records.push_back(gone);
+  BookState out;
+  test::ExpectTrue("characters parsed",
+                   annotation_store_utils::Parse(
+                       annotation_store_utils::Serialize(state), kConsoleA,
+                       &out));
+  test::ExpectEq("both kept", (int)out.records.size(), 2);
+  test::ExpectTrue("character kind", out.records[0].IsLiveCharacter());
+  test::ExpectStrEq("name", out.records[0].quote.c_str(), "Sergeant Hughes");
+  test::ExpectTrue("tombstone kept", out.records[1].kind ==
+                                         Annotation::kCharacter &&
+                                     out.records[1].deleted);
+
+  // A character needs a name; kinds from a newer version are skipped
+  // rather than read as something else; v4 files still load.
+  const std::string data = "3DSLIBRIS-BOOKSTATE 5\n"
+                           "C\t0000000100000001\t1\t1\t0\t0\t0\t\t\t\n"
+                           "Z\t0000000100000002\t1\t1\t0\t0\t0\tz\t\t\n"
+                           "B\t0000000100000003\t1\t1\t0\t5\t9\t\t\t\n";
+  test::ExpectTrue("parsed", annotation_store_utils::Parse(data, kConsoleA, &out));
+  test::ExpectEq("only the bookmark", (int)out.records.size(), 1);
+  test::ExpectTrue("bookmark", out.records[0].kind == Annotation::kBookmark);
+  test::ExpectTrue("v4 header still read",
+                   annotation_store_utils::Parse(
+                       "3DSLIBRIS-BOOKSTATE 4\n"
+                       "H\t0000000100000001\t1\t1\t0\t1\t1\tq\t\t\t0\t0\t0\n",
+                       kConsoleA, &out) &&
+                       out.records.size() == 1);
+}
+
 void TestNextId() {
   BookState state;
   test::ExpectTrue("first id",
@@ -295,5 +337,6 @@ int main() {
   TestBuildFileName();
   TestFileRoundTrip();
   TestNextId();
+  TestCharacters();
   return 0;
 }

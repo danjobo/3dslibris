@@ -20,6 +20,7 @@ source "$(dirname "$0")/test_build.sh"
   "$TEST_ROOT/source/book/book.cpp" \
   "$TEST_ROOT/source/book/reading_pace_utils.cpp" \
   "$TEST_ROOT/source/book/book_annotations.cpp" \
+  "$TEST_ROOT/source/book/character_utils.cpp" \
   "$TEST_ROOT/source/shared/console_id.cpp" \
   "$TEST_ROOT/source/book/annotation_text_utils.cpp" \
   "$TEST_ROOT/source/book/annotation_store_utils.cpp" \

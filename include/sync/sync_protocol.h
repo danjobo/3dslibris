@@ -26,7 +26,8 @@ namespace sync_protocol {
 
 // 2: highlight colors (book state format v3), which version 1 can't read.
 // 3: Readwise upload state (format v4).
-static const uint32_t kProtocolVersion = 3;
+// 4: character records (format v5), which version 3 reads as bookmarks.
+static const uint32_t kProtocolVersion = 4;
 static const uint32_t kMaxPayloadBytes = 16u * 1024u * 1024u;
 static const size_t kHeaderBytes = 12;
 static const size_t kTrailerBytes = 4;
