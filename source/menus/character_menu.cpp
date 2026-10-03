@@ -35,9 +35,32 @@ std::string PageLabel(int page) {
 CharacterMenu::CharacterMenu(App *app)
     : PagedListMenu(app, "characters"), level_(kList), prepared_(true),
       opened_on_mentions_(false), open_id_(0), character_(-1),
-      origin_book_(NULL), origin_page_(0), remove_armed_id_(0) {}
+      origin_book_(NULL), origin_page_(0), remove_armed_id_(0),
+      jump_active_(false), jump_mention_(0) {}
+
+void CharacterMenu::EndJump() {
+  if (!jump_active_)
+    return;
+  jump_active_ = false;
+  if (origin_book_) {
+    origin_book_->SetMarkedName(std::string());
+    origin_book_->SetPosition((u16)origin_page_);
+  }
+}
+
+void CharacterMenu::Resume() {
+  Init();
+  // The mention we jumped to, below the "Back to page" row if there is one.
+  for (size_t i = 0; i < rows_.size(); i++) {
+    if (rows_[i].kind == kMentionRow) {
+      SelectItem((u16)(i + (size_t)jump_mention_));
+      break;
+    }
+  }
+}
 
 void CharacterMenu::Open(uint64_t character_id) {
+  EndJump();
   open_id_ = character_id;
   opened_on_mentions_ = character_id != 0;
   level_ = kList;
@@ -171,9 +194,19 @@ bool CharacterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
     origin_book_ = NULL;
     *page_out = (u16)row.value;
     return true;
-  case kMentionRow:
+  case kMentionRow: {
+    Book *book = ContextBook();
+    if (book && character_ >= 0 && character_ < (int)characters_.size()) {
+      book->SetMarkedName(characters_[(size_t)character_].quote);
+      jump_active_ = true;
+      jump_mention_ = 0;
+      for (size_t i = 0; i < index && i < rows_.size(); i++)
+        if (rows_[i].kind == kMentionRow)
+          jump_mention_++;
+    }
     *page_out = (u16)row.value;
     return true;
+  }
   default:
     return false;
   }

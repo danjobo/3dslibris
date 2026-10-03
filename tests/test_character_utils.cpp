@@ -106,9 +106,26 @@ void TestSnippetCut() {
                     "Kaplan said.");
 }
 
+void TestFindOnPage() {
+  // The newline is a line break in the page buffer; the name still
+  // matches across it, and the range covers the original buffer indices.
+  const std::vector<uint32_t> buf = annotation_text_utils::Utf8ToCodepoints(
+      "Then Dexter\nFilkins, then dexter filkinsville.");
+  std::vector<character_utils::BufRange> ranges;
+  character_utils::FindOnPage("Dexter Filkins", buf.data(), (int)buf.size(),
+                              &ranges);
+  test::ExpectEq("one whole-word match", (int)ranges.size(), 1);
+  test::ExpectEq("begins at Dexter", ranges[0].buf_begin, 5);
+  test::ExpectEq("ends after Filkins", ranges[0].buf_end, 19);
+  character_utils::FindOnPage("then", buf.data(), (int)buf.size(), &ranges);
+  test::ExpectEq("case-insensitive", (int)ranges.size(), 2);
+  test::ExpectEq("second", ranges[1].buf_begin, 21);
+}
+
 } // namespace
 
 int main() {
+  TestFindOnPage();
   TestNameKey();
   TestWholeWordsAndCase();
   TestMultiWordNames();

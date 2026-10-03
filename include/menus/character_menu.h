@@ -4,9 +4,10 @@
     The character list (AppMode::Characters): names saved from a selection
     (hold X > Add as character), each with the first sentence it appears
     in, and for one character every mention up to where you are reading,
-    with the sentence around it. A on a mention jumps there; a "Back to
-    page N" row returns to where you were. Mentions past that page are
-    never shown, so the list can't spoil what's ahead.
+    with the sentence around it. A on a mention jumps there with the name
+    underlined; pages turn as usual, and B comes back to the list and to
+    the page you were reading. Mentions past that page are never shown,
+    so the list can't spoil what's ahead.
 */
 
 #pragma once
@@ -33,6 +34,15 @@ public:
   // B on a character's mentions goes back to the list; X removes a
   // character (press twice).
   void HandleInput(const FrameInput &input) override;
+
+  // Reading a page reached from a mention of this book.
+  bool InJump(const class Book *book) const {
+    return jump_active_ && book && book == origin_book_;
+  }
+  // Ends the jump: back to the page you were reading, no underlines.
+  void EndJump();
+  // Shows the list again where it was before the jump (no new search).
+  void Resume();
 
 protected:
   void BuildEntries(class Book *book, class Text *text,
@@ -64,4 +74,6 @@ private:
   class Book *origin_book_;
   int origin_page_;
   uint64_t remove_armed_id_;
+  bool jump_active_;
+  int jump_mention_; // index of the mention jumped to, in its list
 };

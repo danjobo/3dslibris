@@ -305,6 +305,8 @@ void StatusController::UpdateStatus()
       const text_selection_utils::TextSelectionState &selection =
           app_.MutableTextSelection();
       const char *hint = NULL;
+      if (app_.charactermenu->InJump(current_book))
+        hint = "B:list";
       if (selection.active && selection.lookup)
         hint = "A:look";
       else if (selection.active)

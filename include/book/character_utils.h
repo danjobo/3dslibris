@@ -36,6 +36,15 @@ void FindMentions(const std::vector<std::string> &names,
                   int last_page, size_t max_per_name,
                   std::vector<std::vector<Mention> > *out);
 
+// Where the name appears on one page, as page-buffer ranges
+// [buf_begin, buf_end), matched like FindMentions.
+struct BufRange {
+  int buf_begin;
+  int buf_end;
+};
+void FindOnPage(const std::string &name, const uint32_t *buf, int len,
+                std::vector<BufRange> *out);
+
 // The sentence around chars[begin, end): back to just after the previous
 // '.', '!' or '?' and on to the next one, at most max_side codepoints
 // either way ("..." added where cut). UTF-8.

@@ -566,6 +566,13 @@ public:
   // Reader selection mode: record word boxes during Page::Draw.
   void SetWordCaptureEnabled(bool enabled) { word_capture_enabled_ = enabled; }
   bool IsWordCaptureEnabled() const { return word_capture_enabled_; }
+  //! A character name underlined wherever it appears while set (after
+  //! jumping to one of its mentions); empty for none.
+  void SetMarkedName(const std::string &name) { marked_name_ = name; }
+  const std::string &GetMarkedName() const { return marked_name_; }
+  //! Page-buffer ranges [begin, end) of the marked name on the page.
+  void CollectMarkedRanges(const Page *page,
+                           std::vector<HighlightRange> *out);
 
 private:
   struct AnnotationSpans {
@@ -601,6 +608,7 @@ private:
   const Page *annotation_spans_first_page_ = nullptr;
   bool annotation_full_scan_done_ = false;
   bool word_capture_enabled_ = false;
+  std::string marked_name_;
 };
 
 #include "formats/cbz/cbz_state.h"

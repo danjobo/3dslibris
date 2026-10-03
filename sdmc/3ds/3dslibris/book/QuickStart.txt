@@ -105,7 +105,8 @@ Characters:
   SELECT twice quickly while reading
 - A on a name lists every mention up to the page you're on (nothing
   ahead, so no spoilers), each with its sentence. A on a mention jumps
-  there; "Back to page N" at the top returns to where you were
+  there with the name underlined; turn pages as usual, and B takes you
+  back to the list and to the page you were reading
 - X on a name, twice, removes it. Characters sync with another 3DS
 
 Word lookup:

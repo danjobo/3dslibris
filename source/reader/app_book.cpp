@@ -586,6 +586,9 @@ void ReaderController::CloseBook()
   selection.y_hold_armed = false;
   selection.y_hold_consumed = false;
 
+  // Reading a character mention: what's saved is the page you were on.
+  app_.charactermenu->EndJump();
+
   if (bookcurrent_)
   {
     bookcurrent_->SetWordCaptureEnabled(false);

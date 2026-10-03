@@ -290,6 +290,9 @@ public:
   void ShowBookmarksView();
   // The character list, or one character's mentions (character_id != 0).
   void ShowCharactersView(uint64_t character_id = 0);
+  // After jumping to a character mention: back to the list, and the book
+  // back to the page you were reading. False if no jump is active.
+  bool ReturnToCharacterList();
   void ShowChaptersView();
   void ShowBookInfoView();
   void ShowSyncView();

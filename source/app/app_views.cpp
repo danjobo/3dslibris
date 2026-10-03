@@ -54,6 +54,8 @@ void App::ShowFontView(AppMode app_font_mode)
 
 void App::ShowLibraryView()
 {
+  // Reading a character mention: what's saved is the page you were on.
+  charactermenu->EndJump();
   // Leaving a book linked to Hardcover: send its progress first (this
   // comes back here when done).
   if (GetCurrentBook() &&
@@ -198,6 +200,19 @@ void App::ShowCharactersView(uint64_t character_id)
   ts->PrintString("Finding mentions...");
   ts->SetStyle(saved_style);
   ts->MarkScreenDirty(ts->screenright);
+}
+
+bool App::ReturnToCharacterList()
+{
+  if (!charactermenu->InJump(GetCurrentBook()))
+    return false;
+  charactermenu->EndJump();
+  ApplyRenderOrientation(portrait_orientation);
+  nav_.mode = AppMode::Characters;
+  ts->SetScreen(ts->screenright);
+  charactermenu->Resume();
+  charactermenu->Draw();
+  return true;
 }
 
 void App::ShowChaptersView()

@@ -395,6 +395,25 @@ void Book::CollectHighlightRanges(const Page *page,
   }
 }
 
+void Book::CollectMarkedRanges(const Page *page,
+                               std::vector<HighlightRange> *out) {
+  out->clear();
+  if (marked_name_.empty() || !page || !SupportsAnnotations())
+    return;
+  Page *p = const_cast<Page *>(page);
+  std::vector<character_utils::BufRange> ranges;
+  character_utils::FindOnPage(marked_name_, p->GetBuffer(), p->GetLength(),
+                              &ranges);
+  for (size_t i = 0; i < ranges.size(); i++) {
+    HighlightRange r;
+    r.buf_begin = ranges[i].buf_begin;
+    r.buf_end = ranges[i].buf_end;
+    r.annotation_id = 0;
+    r.color = 0;
+    out->push_back(r);
+  }
+}
+
 uint64_t Book::FindAnnotationAt(int page_index, int buf_index) {
   EnsureAnnotationSpans(false);
   for (size_t i = 0; i < annotation_spans_.size(); i++) {

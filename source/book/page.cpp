@@ -269,9 +269,12 @@ void Page::Draw(Text *ts) {
   // while selection mode needs them (it tints a copy of this page itself).
   rendered_words_.clear();
   std::vector<Book::HighlightRange> highlight_ranges;
+  // A character's name, underlined after jumping to one of its mentions.
+  std::vector<Book::HighlightRange> marked_ranges;
   bool capture_words = false;
   if (book && book->SupportsAnnotations()) {
     book->CollectHighlightRanges(this, &highlight_ranges);
+    book->CollectMarkedRanges(this, &marked_ranges);
     capture_words = book->IsWordCaptureEnabled() &&
                     book->GetPageIndex(this) == book->GetPosition();
   }
@@ -997,6 +1000,13 @@ void Page::Draw(Text *ts) {
       ts->PrintChar(c, glyph_style);
 
       const int glyph_x1 = (int)ts->GetPenX();
+      if (!marked_ranges.empty() && glyph_x1 > glyph_x0 &&
+          RangeAtBufIndex(marked_ranges, glyph_index)) {
+        const int uy = base_pen_y + 2;
+        if (uy + 2 <= ts->LogicalHeight())
+          ts->FillRect((u16)glyph_x0, (u16)uy, (u16)glyph_x1, (u16)(uy + 2),
+                       ts->GetFgColor());
+      }
       if (capture_words) {
         if (IsWordSeparator(c)) {
           open_word = -1;

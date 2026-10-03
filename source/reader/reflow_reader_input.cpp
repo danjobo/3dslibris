@@ -1291,6 +1291,13 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     return true;
   }
 
+  // After jumping to a character mention, B goes back to the list (and the
+  // page you were reading); other page turns work as usual.
+  if ((keys & app.key.b) && app.ReturnToCharacterList()) {
+    app.ResetPageRepeat();
+    return true;
+  }
+
   // X: short press cycles the colour theme (on release), hold enters text
   // selection for highlights and notes.
   if (keys & app.key.x) {
